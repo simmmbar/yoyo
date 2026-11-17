@@ -7,7 +7,7 @@ const { WebSocketServer } = require('ws');
 
 const PORT = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
-const COLS = 12, ROWS = 7, MAX_ITEMS = 60, MAX_ROOM_PLAYERS = 12;
+const COLS = 8, ROWS = 6, MAX_ITEMS = 60, MAX_ROOM_PLAYERS = 12;
 
 // kind: floor(佔地板格) / rug(鋪在地上,可被踩與疊放) / wall(掛在牆上)
 const CATALOG = {
@@ -81,12 +81,19 @@ function newRoom(ownerKey) {
   let code;
   do { code = randCode(6); } while (rooms[code]);
   rooms[code] = {
-    code, ownerKey, wall: 0, floor: 0, guestsEdit: false, nextId: 5,
+    code, ownerKey, wall: 0, floor: 0, guestsEdit: false, nextId: 11,
+    // 新房間附一組基本佈置(之後可自由移動或收回)
     items: [
-      { id: 1, type: 'desk', x: 5, y: 1 },
-      { id: 2, type: 'chair', x: 5, y: 2 },
+      { id: 1, type: 'desk', x: 1, y: 0 },
+      { id: 2, type: 'chair', x: 2, y: 1 },
       { id: 3, type: 'plant', x: 0, y: 0 },
-      { id: 4, type: 'plant', x: 11, y: 0 },
+      { id: 4, type: 'lamp', x: 4, y: 0 },
+      { id: 5, type: 'bookshelf', x: 5, y: 0 },
+      { id: 6, type: 'plant', x: 7, y: 0 },
+      { id: 7, type: 'rug', x: 3, y: 3 },
+      { id: 8, type: 'window', x: 1, y: 0 },
+      { id: 9, type: 'painting', x: 4, y: 0 },
+      { id: 10, type: 'plant', x: 0, y: 5 },
     ],
   };
   markDirty();
@@ -170,8 +177,8 @@ const handlers = {
     if (code && code !== p.room && (live.get(code)?.size || 0) >= MAX_ROOM_PLAYERS) { notice = '那個房間客滿了,已回到你的房間'; code = ''; }
     const room = rooms[code || p.room];
     c.room = room.code;
-    c.x = 4 + Math.random() * 4;
-    c.y = 3.5 + Math.random() * 2.5;
+    c.x = 2.5 + Math.random() * 3;
+    c.y = 2.5 + Math.random() * 2.5;
     const reward = settleFocus(p);
 
     if (!live.has(room.code)) live.set(room.code, new Set());
@@ -320,12 +327,20 @@ const STATIC = {
   '/style.css': ['style.css', 'text/css; charset=utf-8'],
   '/game.js': ['game.js', 'text/javascript; charset=utf-8'],
 };
+const THREE_DIR = path.join(__dirname, 'node_modules', 'three');
 const server = http.createServer((req, res) => {
   const url = req.url.split('?')[0];
   if (url === '/healthz') return res.writeHead(200).end('ok');
-  const hit = STATIC[url];
+  let hit = STATIC[url], file;
+  // three.js 由 node_modules 提供(只開放白名單內的檔案)
+  const v = /^\/vendor\/three\/(three\.(?:module|core)(?:\.min)?\.js)$/.exec(url);
+  if (v) { hit = [null, 'text/javascript; charset=utf-8']; file = path.join(THREE_DIR, 'build', v[1]); }
+  else if (url === '/vendor/addons/geometries/RoundedBoxGeometry.js') {
+    hit = [null, 'text/javascript; charset=utf-8'];
+    file = path.join(THREE_DIR, 'examples/jsm/geometries/RoundedBoxGeometry.js');
+  }
   if (!hit) return res.writeHead(404).end('Not found');
-  fs.readFile(path.join(__dirname, 'public', hit[0]), (err, buf) => {
+  fs.readFile(file || path.join(__dirname, 'public', hit[0]), (err, buf) => {
     if (err) return res.writeHead(500).end('error');
     res.writeHead(200, { 'Content-Type': hit[1], 'Cache-Control': 'no-cache' });
     res.end(buf);
