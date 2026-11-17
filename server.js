@@ -35,7 +35,8 @@ const CATALOG = {
 };
 const AVATAR_RANGES = { skin: 5, hair: 6, hairColor: 7, shirt: 8, acc: 5 };
 const POSES = 2; // 專注姿勢:0 坐著、1 站著
-const MAX_FOCUS_MIN = 180, MAX_TODOS = 30;
+const MAX_FOCUS_MIN = 180, MAX_TODOS = 30, MAX_HABITS = 8, KEEP_DAYS = 70;
+const PARTY_COUNTDOWN = 20000; // 共同專注發起後,等大家加入的時間
 const THEME_COUNT = 6;
 const EMOTES = ['👋', '❤️', '😂', '👍', '🔥', '☕', '💤', '✨'];
 
@@ -132,10 +133,32 @@ function getProfile(key) {
 // 專注計時(都在伺服器端):
 //   pomo 番茄鐘:專注 → 休息 → 專注…自動循環;down 倒數;up 正計時(最多 180 分鐘)
 // focus = { mode, phase: 'focus'|'break', start, end, minutes, breakMin, round }
+// 每日統計以玩家當地日期為準(tz = 與 UTC 相差的分鐘數,由前端回報)
+const dayKey = (p, at = Date.now()) => new Date(at + (p.tz || 0) * 60000).toISOString().slice(0, 10);
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 function credit(p, minutes, done) {
   p.totalMinutes += minutes;
   if (done) p.sessions += 1;
+  if (minutes > 0) {
+    const days = (p.days = p.days || {}), k = dayKey(p);
+    days[k] = (days[k] || 0) + minutes;
+    const keep = dayKey(p, Date.now() - KEEP_DAYS * 86400000);
+    for (const d of Object.keys(days)) if (d < keep) delete days[d];
+  }
   markDirty();
+}
+// 手動結束目前的計時:已經專注的整數分鐘照樣計入。回傳被結束的計時與計入分鐘
+function stopFocus(p) {
+  const f = p.focus;
+  if (!f) return null;
+  p.focus = null;
+  let minutes = 0;
+  if (f.phase === 'focus') {
+    minutes = clamp(Math.floor((Date.now() - f.start) / 60000), 0, f.minutes);
+    credit(p, minutes, f.mode === 'up' && minutes >= 1);
+  }
+  markDirty();
+  return { f, minutes };
 }
 // 一個階段時間到 → 結算並決定下一階段。online=false(斷線期間到期)時不自動接續
 function settleFocus(p, online) {
@@ -174,7 +197,48 @@ const pub = (c) => ({
 const selfProfile = (p) => ({
   name: p.name, avatar: p.avatar, totalMinutes: p.totalMinutes, sessions: p.sessions,
   room: p.room, status: p.status || '', pose: p.pose || 0, todos: p.todos || [],
+  habits: p.habits || [], days: p.days || {}, today: dayKey(p),
 });
+
+// ---------- 共同專注:房主發起,倒數結束後所有加入的人同時開始、同時結束 ----------
+const parties = new Map(); // room code -> { by, byName, minutes, startAt, endAt, joined:Set<key>, started, done:[{id,name}] }
+const partyView = (pt, c) => pt && {
+  by: pt.by, byName: pt.byName, minutes: pt.minutes, started: pt.started,
+  startIn: Math.max(0, pt.startAt - Date.now()), left: Math.max(0, pt.endAt - Date.now()),
+  count: pt.joined.size, joined: pt.joined.has(c.key),
+};
+function sendParty(code) {
+  const pt = parties.get(code) || null;
+  for (const c of live.get(code) || []) send(c, { t: 'party', party: partyView(pt, c) });
+}
+function partyFocus(c, pt) { // 讓這位玩家進入共同專注(中途加入的人只算剩下的時間)
+  const p = c.profile, now = Date.now(), minutes = Math.floor((pt.endAt - now + 999) / 60000);
+  if (minutes < 1) return false;
+  if (p.focus) stopFocus(p);
+  p.focus = { mode: 'party', phase: 'focus', start: now, end: pt.endAt, minutes, breakMin: 0, round: 1 };
+  markDirty();
+  send(c, { t: 'profile', profile: selfProfile(p) });
+  broadcast(c.room, { t: 'pupdate', p: pub(c) });
+  return true;
+}
+function tickParties() {
+  const now = Date.now();
+  for (const [code, pt] of parties) {
+    const set = live.get(code) || new Set();
+    if (!pt.started && now >= pt.startAt) {
+      pt.started = true;
+      for (const c of set) if (pt.joined.has(c.key)) partyFocus(c, pt);
+      sendParty(code);
+    } else if (pt.started && now >= pt.endAt) {
+      parties.delete(code);
+      broadcast(code, { t: 'party_done', minutes: pt.minutes, done: pt.done });
+      sendParty(code);
+    } else if (pt.started && ![...set].some((c) => c.profile.focus?.mode === 'party')) {
+      parties.delete(code); // 大家都離開了
+      sendParty(code);
+    }
+  }
+}
 const roomView = (r) => ({ code: r.code, items: r.items, wall: r.wall, floor: r.floor, guestsEdit: r.guestsEdit });
 
 function leave(c) {
@@ -196,6 +260,7 @@ const handlers = {
     const old = byKey.get(c.key);
     if (old) { send(old, { t: 'kicked' }); leave(old); old.ws.close(); }
     const p = (c.profile = getProfile(c.key));
+    if (Number.isInteger(m.tz) && Math.abs(m.tz) <= 840) p.tz = m.tz;
     byKey.set(c.key, c);
 
     let notice = null;
@@ -217,6 +282,7 @@ const handlers = {
       catalog: CATALOG, cols: COLS, rows: ROWS, emotes: EMOTES, notice,
     });
     if (reward) send(c, { t: 'focus_done', ...reward, offline: true });
+    if (parties.has(room.code)) send(c, { t: 'party', party: partyView(parties.get(room.code), c) });
     set.add(c);
     broadcast(room.code, { t: 'join', p: pub(c) }, c);
   },
@@ -265,20 +331,36 @@ const handlers = {
     broadcast(c.room, { t: 'pupdate', p: pub(c) });
   },
 
-  // 手動結束:已經專注的整數分鐘照樣計入統計
   focus_stop(c) {
-    const p = c.profile, f = p.focus;
-    if (!f) return;
-    p.focus = null;
-    let minutes = 0;
-    if (f.phase === 'focus') {
-      minutes = clamp(Math.floor((Date.now() - f.start) / 60000), 0, f.minutes);
-      credit(p, minutes, f.mode === 'up' && minutes >= 1);
-    }
-    markDirty();
-    send(c, { t: 'focus_done', phase: f.phase, minutes, stopped: true, next: null });
-    send(c, { t: 'profile', profile: selfProfile(p) });
+    const r = stopFocus(c.profile);
+    if (!r) return;
+    send(c, { t: 'focus_done', phase: r.f.phase, minutes: r.minutes, stopped: true, next: null });
+    send(c, { t: 'profile', profile: selfProfile(c.profile) });
     broadcast(c.room, { t: 'pupdate', p: pub(c) });
+    if (r.f.mode === 'party') { parties.get(c.room)?.joined.delete(c.key); sendParty(c.room); }
+  },
+
+  party_start(c, m) {
+    const room = rooms[c.room], minutes = Math.floor(Number(m.minutes));
+    if (!room || room.ownerKey !== c.key) return send(c, { t: 'toast', text: '只有房主可以發起共同專注' });
+    if (parties.has(c.room) || !(minutes >= 1 && minutes <= MAX_FOCUS_MIN)) return;
+    const startAt = Date.now() + PARTY_COUNTDOWN;
+    parties.set(c.room, { by: c.profile.pid, byName: c.profile.name, minutes, startAt, endAt: startAt + minutes * 60000, joined: new Set([c.key]), started: false, done: [] });
+    sendParty(c.room);
+  },
+  party_join(c) {
+    const pt = parties.get(c.room);
+    if (!pt || pt.joined.has(c.key)) return;
+    if (pt.started && !partyFocus(c, pt)) return send(c, { t: 'toast', text: '這一輪快結束了,下次再一起吧' });
+    pt.joined.add(c.key);
+    sendParty(c.room);
+  },
+  // 倒數中:房主取消整場、其他人退出;開始後要離開請直接結束計時
+  party_leave(c) {
+    const pt = parties.get(c.room);
+    if (!pt || pt.started) return;
+    if (pt.by === c.profile.pid) parties.delete(c.room); else pt.joined.delete(c.key);
+    sendParty(c.room);
   },
 
   // 頭上的「正在做什麼」與專注姿勢
@@ -288,6 +370,16 @@ const handlers = {
     if (Number.isInteger(m.pose) && m.pose >= 0 && m.pose < POSES) p.pose = m.pose;
     markDirty();
     broadcast(c.room, { t: 'pupdate', p: pub(c) });
+  },
+
+  // 每日習慣:整份覆蓋;days 是打勾過的日期
+  habits(c, m) {
+    if (!Array.isArray(m.list)) return;
+    c.profile.habits = m.list.slice(0, MAX_HABITS).map((x) => ({
+      name: cleanText(x && x.name, 20),
+      days: [...new Set(Array.isArray(x && x.days) ? x.days.filter((d) => typeof d === 'string' && DATE_RE.test(d)) : [])].sort().slice(-KEEP_DAYS),
+    })).filter((x) => x.name);
+    markDirty();
   },
 
   // 待辦清單:整份覆蓋
@@ -360,12 +452,15 @@ function roomChanged(room) {
 // 每秒檢查線上玩家的計時階段是否到期
 setInterval(() => {
   for (const c of byKey.values()) {
+    const mode = c.profile.focus?.mode;
     const reward = settleFocus(c.profile, true);
     if (!reward) continue;
-    send(c, { t: 'focus_done', ...reward });
+    if (mode === 'party' && reward.phase === 'focus') parties.get(c.room)?.done.push({ id: c.profile.pid, name: c.profile.name });
+    send(c, { t: 'focus_done', ...reward, party: mode === 'party' });
     send(c, { t: 'profile', profile: selfProfile(c.profile) });
     broadcast(c.room, { t: 'pupdate', p: pub(c) });
   }
+  tickParties();
 }, 1000);
 
 // ---------- HTTP ----------

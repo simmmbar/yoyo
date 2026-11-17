@@ -59,14 +59,22 @@
       <button data-pose="1">站著專注</button>
     </div>
     <button id="focusBtn" class="primary">開始專注</button>
+    <button id="partyBtn" hidden title="房間裡的人可以選擇加入,大家同時開始、同時結束">發起共同專注</button>
     <div class="mini"><span>累計 <b id="statMin">0</b> 分鐘</span><span>完成 <b id="statSes">0</b> 次</span></div>
   </section>
 
   <section class="card" id="todoCard">
-    <button class="cardHead" id="todoToggle" aria-expanded="true"><span>待辦清單</span><b id="todoCount"></b></button>
+    <div class="seg small" id="listTabs">
+      <button data-list="todo" class="on">待辦 <b id="todoCount"></b></button>
+      <button data-list="habit">每日習慣 <b id="habitCount"></b></button>
+    </div>
     <div id="todoBody">
       <ul id="todoList"></ul>
       <form id="todoForm"><input id="todoInput" maxlength="60" placeholder="新增一件事…" autocomplete="off"><button aria-label="新增">+</button></form>
+    </div>
+    <div id="habitBody" hidden>
+      <ul id="habitList"></ul>
+      <form id="habitForm"><input id="habitInput" maxlength="20" placeholder="新增習慣,例如:背單字" autocomplete="off"><button aria-label="新增">+</button></form>
     </div>
   </section>
 
@@ -74,6 +82,11 @@
     <div class="cardHead static"><span>環境音</span></div>
     <div id="sounds"></div>
   </section>
+</div>
+
+<div id="partyBar" hidden>
+  <span id="partyText"></span>
+  <button id="partyAct" class="primary"></button>
 </div>
 
 <div id="editBar" hidden>
@@ -89,6 +102,7 @@
     <button data-tab="avatar">角色</button>
     <button data-tab="chat">聊天</button>
     <button data-tab="people">成員</button>
+    <button data-tab="stats">統計</button>
     <button data-tab="settings">設定</button>
   </div>
 </nav>
@@ -98,6 +112,19 @@
 
   <div class="tab" id="tab-people">
     <ul id="members"></ul>
+  </div>
+
+  <div class="tab" id="tab-stats">
+    <div class="tiles" id="statTiles"></div>
+    <div class="chartHead">
+      <h3 id="chartTitle">每日專注分鐘</h3>
+      <div class="seg small" id="chartRange">
+        <button data-days="7" class="on">近 7 天</button>
+        <button data-days="30">近 30 天</button>
+      </div>
+    </div>
+    <div class="chart" id="chart" role="img"></div>
+    <details id="chartTable"><summary>以表格檢視</summary><table><thead><tr><th>日期</th><th>專注分鐘</th></tr></thead><tbody></tbody></table></details>
   </div>
 
   <div class="tab" id="tab-chat">
@@ -148,6 +175,13 @@
     </div>
   </div>
 </aside>
+<div id="photo" hidden>
+  <div class="photoBox">
+    <b>共同專注完成,來張合照!</b>
+    <img id="photoImg" alt="共同專注合照">
+    <div class="row"><a id="photoSave" class="btnlike primary" download="yoyo-focus.jpg">下載合照</a><button id="photoClose">關閉</button></div>
+  </div>
+</div>
 <div id="toasts"></div>
 <script>
 // 載入失敗時把原因顯示出來,不要只留一片空白

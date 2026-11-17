@@ -251,6 +251,72 @@ body.focusing #timerSetup, body.focusing #modes, body.focusing #poses { display:
 }
 @keyframes pop { from { transform: translateY(-8px); opacity: 0; } }
 
+/* 每日習慣 */
+#listTabs b { font-weight: 400; opacity: .8; }
+#habitList { list-style: none; margin: 0; padding: 0; max-height: 220px; overflow-y: auto; }
+#habitList li { padding: 4px 0; font-size: 14px; }
+#habitList .top { display: flex; align-items: center; gap: 8px; }
+#habitList .top span { flex: 1; overflow-wrap: anywhere; }
+#habitList input { accent-color: var(--accent); width: 16px; height: 16px; padding: 0; flex: none; }
+#habitList button { border: 0; background: transparent; padding: 0 4px; color: var(--muted); }
+#habitList .week { display: flex; align-items: center; gap: 4px; margin: 3px 0 0 24px; font-size: 11px; color: var(--muted); }
+#habitList .week i { width: 9px; height: 9px; border-radius: 50%; border: 1px solid rgba(255, 255, 255, .28); }
+#habitList .week i.on { background: var(--accent); border-color: var(--accent); }
+#habitList .week em { font-style: normal; margin-left: 4px; }
+#habitForm { display: flex; gap: 6px; margin-top: 6px; }
+#habitForm input { flex: 1; font-size: 13px; }
+#habitForm button { width: 34px; padding: 0; font-size: 18px; }
+#todoForm { margin-top: 6px; }
+
+/* 共同專注 */
+#partyBar {
+  position: fixed; left: 50%; top: 58px; transform: translateX(-50%); z-index: 8;
+  display: flex; gap: 10px; align-items: center;
+  background: var(--glass); backdrop-filter: blur(14px);
+  border: 1px solid var(--accent); border-radius: 999px;
+  padding: 6px 8px 6px 18px; font-size: 13px; max-width: calc(100% - 24px);
+  box-shadow: 0 10px 30px rgba(10, 8, 30, .35);
+}
+#partyBar button { border-radius: 999px; white-space: nowrap; padding: 4px 14px; }
+#partyText { font-variant-numeric: tabular-nums; }
+#partyBtn { width: 100%; border-radius: 999px; font-size: 13px; padding: 6px; }
+#photo { position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; background: rgba(15, 14, 34, .72); backdrop-filter: blur(6px); padding: 20px; }
+.photoBox { background: var(--glass); border: 1px solid var(--line); border-radius: 24px; padding: 16px; display: flex; flex-direction: column; gap: 12px; align-items: center; max-width: min(760px, 100%); }
+.photoBox img { max-width: 100%; max-height: 62vh; border-radius: 14px; display: block; }
+.btnlike { border-radius: 12px; padding: 6px 14px; text-decoration: none; }
+.btnlike.primary { background: var(--accent); color: var(--accent-ink); font-weight: 700; }
+
+/* 統計 */
+.tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.tiles div { background: var(--glass2); border-radius: 16px; padding: 10px 12px; }
+.tiles b { display: block; font-size: 24px; font-variant-numeric: tabular-nums; line-height: 1.2; }
+.tiles b small { font-size: 12px; font-weight: 400; color: var(--muted); margin-left: 3px; }
+.tiles span { font-size: 12px; color: var(--muted); }
+.chartHead { display: flex; justify-content: space-between; align-items: center; margin: 18px 0 8px; }
+.chartHead h3 { margin: 0; }
+.chart { position: relative; display: flex; align-items: flex-end; gap: 2px; height: 170px; padding: 18px 0 20px; border-bottom: 0; }
+.chart::after { content: ""; position: absolute; left: 0; right: 0; bottom: 20px; border-top: 1px solid var(--line); }
+.chart .max { position: absolute; left: 0; right: 0; top: 18px; border-top: 1px dashed rgba(255, 255, 255, .1); }
+.chart .max span { position: absolute; right: 0; top: -15px; font-size: 10px; color: var(--muted); }
+.chart .col { flex: 1 1 0; min-width: 0; height: 100%; position: relative; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; outline: 0; }
+.chart .bar { position: relative; width: 100%; max-width: 24px; background: #c98040; border-radius: 4px 4px 0 0; min-height: 0; }
+.chart .col:hover .bar, .chart .col:focus-visible .bar { background: #dc9656; }
+.chart .col:focus-visible { box-shadow: inset 0 0 0 1px var(--accent); border-radius: 4px; }
+.chart .val { position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%); font-size: 11px; color: var(--text); padding-bottom: 2px; font-variant-numeric: tabular-nums; }
+.chart .x { position: absolute; bottom: -18px; left: 50%; transform: translateX(-50%); font-size: 10px; color: var(--muted); white-space: nowrap; }
+.chart .x.today { color: var(--text); font-weight: 700; }
+.chart .tip {
+  position: absolute; z-index: 2; pointer-events: none; transform: translate(-50%, -100%);
+  background: #1b1930; border: 1px solid var(--line); border-radius: 10px; padding: 4px 10px;
+  font-size: 12px; white-space: nowrap; color: var(--muted);
+}
+.chart .tip b { color: var(--text); margin-right: 6px; font-variant-numeric: tabular-nums; }
+#chartTable { margin-top: 14px; font-size: 12px; color: var(--muted); }
+#chartTable summary { cursor: pointer; }
+#chartTable table { width: 100%; border-collapse: collapse; margin-top: 6px; font-variant-numeric: tabular-nums; }
+#chartTable th, #chartTable td { text-align: left; padding: 3px 0; border-bottom: 1px solid var(--line); font-weight: 400; }
+#chartTable td:last-child, #chartTable th:last-child { text-align: right; }
+
 @media (max-width: 860px) {
   h1 { display: none; }
   .hud { padding: 8px; gap: 6px; }
@@ -266,5 +332,6 @@ body.focusing #timerSetup, body.focusing #modes, body.focusing #poses { display:
   #focusBtn { padding: 6px; font-size: 14px; }
   #todoCard, #musicCard { display: none; }
   #drawer { left: 8px; right: 8px; top: auto; bottom: 8px; width: auto; height: 62vh; }
-  #tabs button { padding: 7px 11px; font-size: 13px; }
+  #tabs button { padding: 7px 9px; font-size: 13px; }
+  #partyBar { top: 92px; border-radius: 18px; flex-wrap: wrap; justify-content: center; padding: 8px 12px; }
 }

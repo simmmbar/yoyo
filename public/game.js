@@ -54,7 +54,7 @@ function connect() {
   $('#overlay').hidden = false;
   $('#overlayText').textContent = '連線中…';
   ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host);
-  ws.onopen = () => send({ t: 'hello', token, room: new URLSearchParams(location.search).get('room') || '' });
+  ws.onopen = () => send({ t: 'hello', token, tz: -new Date().getTimezoneOffset(), room: new URLSearchParams(location.search).get('room') || '' });
   ws.onmessage = (ev) => { const m = JSON.parse(ev.data); on[m.t]?.(m); };
   ws.onclose = () => {
     if (kicked) return;
@@ -84,6 +84,7 @@ const on = {
     me = m.me; CATALOG = m.catalog; COLS = m.cols; ROWS = m.rows;
     room = m.room;
     clearPlayers();
+    setParty(null);
     m.players.forEach(addPlayer);
     setProfile(m.profile, true);
     $('#overlay').hidden = true;
@@ -127,8 +128,17 @@ const on = {
     refreshRoomUI();
   },
   profile(m) { setProfile(m.profile); },
+  party(m) { setParty(m.party); },
+  party_done(m) {
+    const now = performance.now();
+    for (const d of m.done) { const p = players.get(d.id); if (p) p.cheerUntil = now + 7000; }
+    if (!m.done.length) return;
+    sysLog(`共同專注 ${m.minutes} 分鐘完成:${m.done.map((d) => d.name).join('、')}`);
+    if (m.done.some((d) => d.id === me)) takeGroupPhoto(m); else toast(`${m.done.length} 人完成了共同專注 ${m.minutes} 分鐘`);
+  },
   focus_done(m) {
     if (m.stopped) { if (m.minutes) toast(`已記錄 ${m.minutes} 分鐘專注`); }
+    else if (m.party) toast(`共同專注 ${m.minutes} 分鐘完成!`);
     else if (m.phase === 'break') toast(m.next ? '休息結束,開始下一輪專注' : '休息結束');
     else toast(m.next === 'break' ? `專注 ${m.minutes} 分鐘完成!休息 ${m.breakMin} 分鐘` : `專注 ${m.minutes} 分鐘完成!`);
     if (!m.stopped) chime();
@@ -463,10 +473,10 @@ function buildAvatar(a, onReady) {
   });
   return g;
 }
-function poseAvatar(g, dt, walking, sitting, ownStool) {
+function poseAvatar(g, dt, walking, sitting, ownStool, cheering) {
   const u = g.userData;
   if (!u.ready) return;
-  const want = walking ? 'Walk' : sitting && u.act.SitDown ? 'SitDown' : 'Idle';
+  const want = walking ? 'Walk' : cheering && u.act.Victory ? 'Victory' : sitting && u.act.SitDown ? 'SitDown' : 'Idle';
   if (want !== u.cur && u.act[want]) {
     u.act[want].reset().fadeIn(0.2).play();
     u.act[u.cur]?.fadeOut(0.2);
@@ -850,7 +860,7 @@ function frame(t) {
     const fwd = sitting && p.seat ? SIT_FWD : 0;
     p.sit = (p.sit || 0) + (fwd - (p.sit || 0)) * Math.min(1, dt * 8);
     p.obj.position.set(p.x + Math.sin(p.obj.rotation.y) * p.sit, 0, p.y + Math.cos(p.obj.rotation.y) * p.sit);
-    poseAvatar(p.obj, dt, walking, sitting, !p.seat);
+    poseAvatar(p.obj, dt, walking, sitting, !p.seat, p.cheerUntil > t);
     // 標籤
     tmpV.set(p.x, AVATAR_H + 0.12, p.y).project(camera);
     p.el.style.transform = `translate(${((tmpV.x + 1) / 2) * sw}px, ${((1 - tmpV.y) / 2) * sh}px) translate(-50%, -100%)`;
@@ -872,6 +882,7 @@ function frame(t) {
     }
   }
   if (post) post.render(); else renderer.render(scene, camera);
+  if (photoJob && t >= photoJob.at) { const j = photoJob; photoJob = null; composePhoto(j); }
   tickTimer(t);
 }
 
@@ -950,7 +961,7 @@ window.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') setHolding
 
 // ---------- 面板(底部工具列開關右側抽屜) ----------
 let currentTab = null;
-const TAB_TITLES = { decor: '佈置房間', avatar: '角色', chat: '聊天', people: '房間成員', settings: '設定' };
+const TAB_TITLES = { decor: '佈置房間', avatar: '角色', chat: '聊天', people: '房間成員', stats: '專注統計', settings: '設定' };
 const editing = () => currentTab === 'decor' && canEdit();
 function openTab(name) {
   currentTab = name;
@@ -960,6 +971,7 @@ function openTab(name) {
   document.querySelectorAll('.tab').forEach((x) => x.classList.toggle('on', x.id === 'tab-' + name));
   if (name !== 'decor') setHolding(null);
   if (name === 'avatar') renderAvatarPreview();
+  if (name === 'stats') renderStats();
   if (name === 'chat') { $('#tabs [data-tab=chat]').classList.remove('dot'); $('#chatLog').scrollTop = 1e9; }
 }
 $('#tabs').addEventListener('click', (ev) => {
@@ -971,6 +983,7 @@ $('#drawerClose').addEventListener('click', () => openTab(null));
 // ---------- 專注計時 ----------
 const num = (id, lo, hi, def) => { const v = Math.floor(+$(id).value); return v >= lo && v <= hi ? v : def; };
 const idleMs = () => (timerMode === 'up' ? 0 : (timerMode === 'pomo' ? num('#pomoFocus', 1, 180, 25) : selectedMin) * 60000);
+let lastSec = -1;
 function tickTimer(t) {
   let f = myFocus();
   if (f && f.mode !== 'up' && f.endAt <= t - 1500) f = null; // 等伺服器送下一階段
@@ -980,6 +993,8 @@ function tickTimer(t) {
     document.title = f ? `${text} ${f.phase === 'break' ? '休息中' : '專注中'} — 悠悠自習室` : '悠悠自習室';
     if (f && currentTab === 'people') refreshMembers();
   }
+  const sec = Math.floor(t / 1000);
+  if (party && sec !== lastSec) { lastSec = sec; refreshParty(); }
 }
 function refreshTimer() {
   const f = myFocus();
@@ -988,10 +1003,12 @@ function refreshTimer() {
   lab.classList.toggle('break', f?.phase === 'break');
   lab.textContent = !f ? '準備好就開始吧'
     : f.phase === 'break' ? `休息一下 · 第 ${f.round} 輪結束`
+    : f.mode === 'party' ? `共同專注中${party ? ` · ${party.count} 人` : ''}`
     : f.mode === 'pomo' ? `專注中 · 第 ${f.round} 輪` : '專注中';
   $('#focusBtn').textContent = f ? '結束' : '開始專注';
   $('#focusBtn').className = f ? 'danger' : 'primary';
-  if (f) setMode(f.mode, true);
+  if (f && f.mode !== 'party') setMode(f.mode, true);
+  refreshParty();
 }
 function setMode(m, silent) {
   timerMode = m;
@@ -1039,7 +1056,7 @@ function renderTodos() {
     return el('li', { className: td.done ? 'done' : '' }, cb, el('span', { textContent: td.text }), del);
   }));
   const left = todos.filter((x) => !x.done).length;
-  $('#todoCount').textContent = todos.length ? `${left} 件未完成` : '';
+  $('#todoCount').textContent = left ? left : '';
 }
 function saveTodos() { renderTodos(); send({ t: 'todos', list: todos }); }
 $('#todoForm').addEventListener('submit', (ev) => {
@@ -1051,11 +1068,176 @@ $('#todoForm').addEventListener('submit', (ev) => {
   $('#todoInput').value = '';
   saveTodos();
 });
-$('#todoToggle').addEventListener('click', (ev) => {
-  const open = $('#todoBody').hidden;
-  $('#todoBody').hidden = !open;
-  ev.currentTarget.setAttribute('aria-expanded', open);
+$('#listTabs').addEventListener('click', (ev) => {
+  const b = ev.target.closest('button');
+  if (!b) return;
+  document.querySelectorAll('#listTabs button').forEach((x) => x.classList.toggle('on', x === b));
+  $('#todoBody').hidden = b.dataset.list !== 'todo';
+  $('#habitBody').hidden = b.dataset.list !== 'habit';
 });
+
+// ---------- 日期工具(一律用玩家當地日期) ----------
+const pad2 = (n) => String(n).padStart(2, '0');
+const dayStr = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+const dayAgo = (n) => { const d = new Date(); d.setHours(12, 0, 0, 0); d.setDate(d.getDate() - n); return d; };
+const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
+// 連續天數:從今天往回數;今天還沒達成時從昨天算起,不會因為今天還沒做就歸零
+function streakOf(has) {
+  let n = 0, i = has(dayStr(dayAgo(0))) ? 0 : 1;
+  while (has(dayStr(dayAgo(i)))) { n++; i++; }
+  return n;
+}
+
+// ---------- 每日習慣 ----------
+let habits = [];
+function renderHabits() {
+  const today = dayStr(dayAgo(0));
+  $('#habitList').replaceChildren(...habits.map((h, i) => {
+    const set = new Set(h.days);
+    const cb = el('input', { type: 'checkbox', checked: set.has(today), ariaLabel: `今天完成 ${h.name}` });
+    cb.onchange = () => {
+      if (cb.checked) set.add(today); else set.delete(today);
+      h.days = [...set].sort(); saveHabits();
+    };
+    const del = el('button', { type: 'button', textContent: '✕', ariaLabel: '刪除' });
+    del.onclick = () => { if (confirm(`刪除習慣「${h.name}」和它的打卡紀錄?`)) { habits.splice(i, 1); saveHabits(); } };
+    const dots = [6, 5, 4, 3, 2, 1, 0].map((n) => {
+      const d = dayAgo(n);
+      return el('i', { className: set.has(dayStr(d)) ? 'on' : '', title: `${d.getMonth() + 1}/${d.getDate()}(${WEEKDAYS[d.getDay()]})${set.has(dayStr(d)) ? ' 已完成' : ''}` });
+    });
+    const st = streakOf((k) => set.has(k));
+    return el('li', {},
+      el('div', { className: 'top' }, cb, el('span', { textContent: h.name }), del),
+      el('div', { className: 'week' }, ...dots, el('em', { textContent: st ? `連續 ${st} 天` : '近 7 天' })));
+  }));
+  const left = habits.filter((h) => !h.days.includes(today)).length;
+  $('#habitCount').textContent = left ? left : '';
+}
+function saveHabits() { renderHabits(); send({ t: 'habits', list: habits }); }
+$('#habitForm').addEventListener('submit', (ev) => {
+  ev.preventDefault();
+  const v = $('#habitInput').value.trim();
+  if (!v) return;
+  if (habits.length >= 8) return toast('習慣最多 8 個');
+  habits.push({ name: v.slice(0, 20), days: [] });
+  $('#habitInput').value = '';
+  saveHabits();
+});
+
+// ---------- 專注統計 ----------
+let chartDays = 7;
+function renderStats() {
+  if (!profile) return;
+  const days = profile.days || {}, get = (n) => days[dayStr(dayAgo(n))] || 0;
+  const dow = (new Date().getDay() + 6) % 7; // 週一為一週的開始
+  let week = 0;
+  for (let i = 0; i <= dow; i++) week += get(i);
+  const tile = (v, unit, label) => el('div', {}, el('b', {}, String(v), el('small', { textContent: unit })), el('span', { textContent: label }));
+  $('#statTiles').replaceChildren(
+    tile(get(0), '分', '今天'), tile(week, '分', '本週(週一起)'),
+    tile(streakOf((k) => days[k] > 0), '天', '連續專注'), tile(profile.totalMinutes, '分', `累計 · 完成 ${profile.sessions} 次`));
+
+  const rows = [];
+  for (let n = chartDays - 1; n >= 0; n--) { const d = dayAgo(n); rows.push({ d, n, v: get(n) }); }
+  const max = Math.max(...rows.map((r) => r.v)), top = Math.max(10, Math.ceil(max / 10) * 10);
+  const chart = $('#chart');
+  const tip = el('div', { className: 'tip', hidden: true });
+  const label = (r) => `${r.d.getMonth() + 1}/${r.d.getDate()}(${WEEKDAYS[r.d.getDay()]})`;
+  chart.replaceChildren(el('div', { className: 'max' }, el('span', { textContent: `${top} 分` })), ...rows.map((r) => {
+    const col = el('div', { className: 'col', tabIndex: 0, ariaLabel: `${label(r)} ${r.v} 分鐘` });
+    // 數值標籤只在 7 天檢視顯示;30 天檢視只標最高的一天,其餘看提示或表格
+    const bar = el('div', { className: 'bar' }); bar.style.height = `${(r.v / top) * 100}%`;
+    if (r.v && (chartDays === 7 || r.v === max)) bar.append(el('div', { className: 'val', textContent: r.v }));
+    col.append(bar);
+    if (chartDays === 7 || r.n % 7 === 0) col.append(el('div', { className: 'x' + (r.n === 0 ? ' today' : ''), textContent: chartDays === 7 ? (r.n === 0 ? '今天' : WEEKDAYS[r.d.getDay()]) : (r.n === 0 ? '今天' : `${r.d.getMonth() + 1}/${r.d.getDate()}`) }));
+    const show = () => {
+      tip.replaceChildren(el('b', { textContent: `${r.v} 分鐘` }), label(r));
+      tip.hidden = false;
+      tip.style.left = `${Math.min(chart.clientWidth - 60, Math.max(60, col.offsetLeft + col.offsetWidth / 2))}px`;
+      tip.style.top = `${Math.max(14, bar.offsetTop - 6)}px`;
+    };
+    col.addEventListener('pointerenter', show); col.addEventListener('focus', show);
+    col.addEventListener('pointerleave', () => { tip.hidden = true; }); col.addEventListener('blur', () => { tip.hidden = true; });
+    return col;
+  }), tip);
+  chart.ariaLabel = `近 ${chartDays} 天每日專注分鐘,共 ${rows.reduce((a, r) => a + r.v, 0)} 分鐘`;
+  $('#chartTable tbody').replaceChildren(...rows.slice().reverse().map((r) => el('tr', {}, el('td', { textContent: label(r) }), el('td', { textContent: r.v }))));
+}
+$('#chartRange').addEventListener('click', (ev) => {
+  const b = ev.target.closest('button');
+  if (!b) return;
+  chartDays = +b.dataset.days;
+  document.querySelectorAll('#chartRange button').forEach((x) => x.classList.toggle('on', x === b));
+  renderStats();
+});
+
+// ---------- 共同專注(房主發起,大家同時開始、同時結束) ----------
+let party = null;
+function setParty(pt) {
+  const now = performance.now();
+  party = pt ? { ...pt, startAt: now + pt.startIn, endAt: now + pt.left } : null;
+  refreshTimer();
+}
+function refreshParty() {
+  const f = myFocus(), now = performance.now(), bar = $('#partyBar'), act = $('#partyAct');
+  $('#partyBtn').hidden = !(room?.mine && !f && !party);
+  const mineParty = f?.mode === 'party';
+  bar.hidden = !party || mineParty;
+  if (!party || mineParty) return;
+  const host = party.by === me;
+  if (!party.started) {
+    const sec = Math.max(0, Math.ceil((party.startAt - now) / 1000));
+    $('#partyText').textContent = `${host ? '你' : party.byName} 發起共同專注 ${party.minutes} 分鐘 · ${sec} 秒後開始 · 已加入 ${party.count} 人`;
+    act.textContent = host ? '取消' : party.joined ? '退出' : '加入';
+    act.className = party.joined ? '' : 'primary';
+    act.onclick = () => send({ t: party.joined ? 'party_leave' : 'party_join' });
+  } else {
+    $('#partyText').textContent = `共同專注進行中 · ${party.count} 人 · 剩 ${fmt(party.endAt - now)}`;
+    act.textContent = '中途加入'; act.className = 'primary';
+    act.onclick = () => send({ t: 'party_join' });
+  }
+}
+$('#partyBtn').addEventListener('click', () => {
+  const minutes = timerMode === 'pomo' ? num('#pomoFocus', 1, 180, 25) : timerMode === 'down' ? selectedMin : 25;
+  send({ t: 'party_start', minutes });
+});
+
+// 合照:切到全景、等大家歡呼,再把畫面連同名字合成一張圖
+let photoJob = null;
+function takeGroupPhoto(m) {
+  chime();
+  applyView('room');
+  photoJob = { at: performance.now() + 2600, minutes: m.minutes, ids: m.done.map((d) => d.id) };
+}
+function composePhoto(job) {
+  try {
+    const W = canvas.width, H = canvas.height, k = W / (stage.clientWidth || W);
+    const cv = el('canvas', { width: W, height: H }), c = cv.getContext('2d');
+    const g = c.createLinearGradient(0, 0, W * 0.18, H);
+    g.addColorStop(0, '#171a33'); g.addColorStop(0.48, '#2c2548'); g.addColorStop(1, '#5b3f5e');
+    c.fillStyle = g; c.fillRect(0, 0, W, H);
+    c.drawImage(canvas, 0, 0);
+    c.textAlign = 'center'; c.textBaseline = 'middle'; c.font = `${13 * k}px system-ui, "PingFang TC", "Noto Sans TC", sans-serif`;
+    for (const id of job.ids) {
+      const p = players.get(id);
+      if (!p) continue;
+      tmpV.set(p.x, AVATAR_H + 0.22, p.y).project(camera);
+      const x = ((tmpV.x + 1) / 2) * W, y = ((1 - tmpV.y) / 2) * H, w = c.measureText(p.name).width + 20 * k, h = 22 * k;
+      c.fillStyle = 'rgba(23,26,51,.72)'; c.beginPath(); c.roundRect(x - w / 2, y - h / 2, w, h, h / 2); c.fill();
+      c.fillStyle = '#fff'; c.fillText(p.name, x, y + k);
+    }
+    const d = new Date();
+    c.textAlign = 'left'; c.font = `700 ${22 * k}px system-ui, "PingFang TC", "Noto Sans TC", sans-serif`;
+    c.fillStyle = '#ffc98a'; c.fillText('☾ 悠悠自習室', 24 * k, H - 56 * k);
+    c.font = `${16 * k}px system-ui, "PingFang TC", "Noto Sans TC", sans-serif`; c.fillStyle = '#f6efe6';
+    c.fillText(`${job.ids.length} 人共同專注 ${job.minutes} 分鐘 · ${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`, 24 * k, H - 26 * k);
+    const url = cv.toDataURL('image/jpeg', 0.9);
+    $('#photoImg').src = url; $('#photoSave').href = url;
+    $('#photo').hidden = false;
+  } catch (e) { console.error(e); }
+  setView(view); // 鏡頭回到原本的視角
+}
+$('#photoClose').addEventListener('click', () => { $('#photo').hidden = true; });
 
 function refreshMembers() {
   const ul = $('#members'), now = performance.now();
@@ -1140,9 +1322,11 @@ function setProfile(p, first) {
   }
   if (first) {
     todos = (p.todos || []).map((x) => ({ ...x })); renderTodos();
+    habits = (p.habits || []).map((x) => ({ name: x.name, days: [...x.days] })); renderHabits();
     $('#statusInput').value = p.status || '';
     setPose(p.pose || 0);
   }
+  if (currentTab === 'stats') renderStats();
   refreshTimer();
 }
 function pushProfile() {
