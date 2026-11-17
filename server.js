@@ -14,14 +14,19 @@ const CATALOG = {
   desk:      { name: '書桌',     price: 0,   w: 2, h: 1, kind: 'floor' },
   chair:     { name: '椅子',     price: 0,   w: 1, h: 1, kind: 'floor' },
   plant:     { name: '盆栽',     price: 0,   w: 1, h: 1, kind: 'floor' },
-  rug:       { name: '地毯',     price: 20,  w: 3, h: 2, kind: 'rug' },
+  rug:       { name: '條紋地毯', price: 20,  w: 3, h: 2, kind: 'rug' },
   clock:     { name: '時鐘',     price: 25,  w: 1, h: 1, kind: 'wall' },
   lamp:      { name: '立燈',     price: 30,  w: 1, h: 1, kind: 'floor' },
+  rug2:      { name: '圓地毯',   price: 30,  w: 3, h: 2, kind: 'rug' },
+  stool:     { name: '小凳子',   price: 30,  w: 1, h: 1, kind: 'floor' },
   window:    { name: '窗戶',     price: 40,  w: 2, h: 1, kind: 'wall' },
-  table:     { name: '茶几',     price: 45,  w: 1, h: 1, kind: 'floor' },
+  table:     { name: '小桌',     price: 45,  w: 1, h: 1, kind: 'floor' },
+  shelf:     { name: '壁掛書架', price: 45,  w: 2, h: 1, kind: 'wall' },
   painting:  { name: '掛畫',     price: 50,  w: 1, h: 1, kind: 'wall' },
-  bookshelf: { name: '書櫃',     price: 60,  w: 2, h: 1, kind: 'floor' },
-  tree:      { name: '大型植栽', price: 70,  w: 1, h: 1, kind: 'floor' },
+  cabinet:   { name: '床頭櫃',   price: 55,  w: 1, h: 1, kind: 'floor' },
+  bookshelf: { name: '置物櫃',   price: 60,  w: 2, h: 1, kind: 'floor' },
+  tree:      { name: '仙人掌',   price: 70,  w: 1, h: 1, kind: 'floor' },
+  armchair:  { name: '單人沙發', price: 70,  w: 1, h: 1, kind: 'floor' },
   sofa:      { name: '沙發',     price: 80,  w: 2, h: 1, kind: 'floor' },
   bed:       { name: '床',       price: 100, w: 1, h: 2, kind: 'floor' },
   aquarium:  { name: '魚缸',     price: 120, w: 1, h: 1, kind: 'floor' },
@@ -81,7 +86,7 @@ function newRoom(ownerKey) {
   let code;
   do { code = randCode(6); } while (rooms[code]);
   rooms[code] = {
-    code, ownerKey, wall: 0, floor: 0, guestsEdit: false, nextId: 11,
+    code, ownerKey, wall: 0, floor: 0, guestsEdit: false, nextId: 12,
     // 新房間附一組基本佈置(之後可自由移動或收回)
     items: [
       { id: 1, type: 'desk', x: 1, y: 0 },
@@ -92,7 +97,8 @@ function newRoom(ownerKey) {
       { id: 6, type: 'plant', x: 7, y: 0 },
       { id: 7, type: 'rug', x: 3, y: 3 },
       { id: 8, type: 'window', x: 1, y: 0 },
-      { id: 9, type: 'painting', x: 4, y: 0 },
+      { id: 9, type: 'painting', x: 3, y: 0 },
+      { id: 11, type: 'shelf', x: 5, y: 0 },
       { id: 10, type: 'plant', x: 0, y: 5 },
     ],
   };
@@ -335,13 +341,17 @@ const server = http.createServer((req, res) => {
   // three.js 由 node_modules 提供(只開放白名單內的檔案)
   const v = /^\/vendor\/three\/(three\.(?:module|core)(?:\.min)?\.js)$/.exec(url);
   if (v) { hit = [null, 'text/javascript; charset=utf-8']; file = path.join(THREE_DIR, 'build', v[1]); }
-  else if (url === '/vendor/addons/geometries/RoundedBoxGeometry.js') {
-    hit = [null, 'text/javascript; charset=utf-8'];
-    file = path.join(THREE_DIR, 'examples/jsm/geometries/RoundedBoxGeometry.js');
+  const ad = /^\/vendor\/addons\/((?:[\w-]+\/)*[\w-]+\.js)$/.exec(url);
+  if (ad) { hit = [null, 'text/javascript; charset=utf-8']; file = path.join(THREE_DIR, 'examples/jsm', ad[1]); }
+  // 家具模型(KayKit Furniture Bits,CC0)
+  const as = /^\/assets\/kaykit\/([\w-]+\.(gltf|bin|png|txt))$/.exec(url);
+  if (as) {
+    const types = { gltf: 'model/gltf+json', bin: 'application/octet-stream', png: 'image/png', txt: 'text/plain; charset=utf-8' };
+    hit = [null, types[as[2]]]; file = path.join(__dirname, 'public/assets/kaykit', as[1]);
   }
   if (!hit) return res.writeHead(404).end('Not found');
   fs.readFile(file || path.join(__dirname, 'public', hit[0]), (err, buf) => {
-    if (err) return res.writeHead(500).end('error');
+    if (err) return res.writeHead(err.code === 'ENOENT' ? 404 : 500).end('error');
     res.writeHead(200, { 'Content-Type': hit[1], 'Cache-Control': 'no-cache' });
     res.end(buf);
   });

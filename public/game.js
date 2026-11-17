@@ -1,6 +1,7 @@
 /* 悠悠自習室 — 前端(three.js 等角 3D 房間) */
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 (() => {
 'use strict';
@@ -87,8 +88,7 @@ const on = {
       history.replaceState(null, '', '?room=' + room.code);
     }
     buildEmotes(m.emotes);
-    rebuildRoom();
-    buildCatalog();
+    modelsReady.then(() => { rebuildRoom(); buildCatalog(); });
     refreshRoomUI();
     refreshMembers();
     sysLog(room.mine ? '歡迎回到你的房間 ✨' : `你來到了 ${room.ownerName || '朋友'} 的房間`);
@@ -226,11 +226,43 @@ const WOOD = '#d7a26c', WOOD_D = '#b98352', WOOD_DD = '#9a6a40', CREAM = '#fbf6e
 const BOOKS = ['#ee8a8f', '#ffc98a', '#7cc3d6', '#9ed59a', '#c09ae0', '#fbf6ec', '#8c9cea'];
 
 // 家具:原點在佔地的左後角(x、z 最小處);牆面物件原點在牆腳,+z 為朝房間方向
+// 專業模型:KayKit Furniture Bits(Kay Lousberg,CC0)
+const MODEL_NAMES = ['table_medium_long', 'chair_A', 'chair_stool', 'cactus_medium_A', 'cactus_medium_B', 'rug_rectangle_stripes_A', 'rug_oval_A',
+  'lamp_standing', 'table_small', 'cabinet_medium_decorated', 'cabinet_small_decorated', 'couch_pillows', 'armchair_pillows', 'bed_single_A',
+  'pictureframe_large_A', 'shelf_B_large_decorated', 'lamp_table'];
+const MODEL = {};
+const modelsReady = Promise.all(MODEL_NAMES.map((n) => new GLTFLoader().loadAsync(`/assets/kaykit/${n}.gltf`).then((g) => {
+  g.scene.traverse((o) => {
+    if (!o.isMesh) return;
+    o.castShadow = !n.startsWith('rug'); o.receiveShadow = true;
+    o.material.roughness = 0.85; o.material.metalness = 0;
+  });
+  MODEL[n] = g.scene;
+})));
+function put(g, name, s, x, y, z, ry = 0) {
+  const o = MODEL[name].clone();
+  if (Array.isArray(s)) o.scale.set(...s); else o.scale.setScalar(s);
+  o.position.set(x, y, z); o.rotation.y = ry;
+  g.add(o); return o;
+}
+
 const BUILD = {
+  chair(g) { put(g, 'chair_A', 0.68, 0.5, 0, 0.5); },
+  stool(g) { put(g, 'chair_stool', 0.68, 0.5, 0, 0.5); },
+  plant(g) { put(g, 'cactus_medium_A', 0.95, 0.5, 0, 0.5); },
+  tree(g) { put(g, 'cactus_medium_B', 1.1, 0.5, 0, 0.5); },
+  rug(g) { put(g, 'rug_rectangle_stripes_A', [0.95, 0.5, 0.94], 1.5, 0, 1); },
+  rug2(g) { put(g, 'rug_oval_A', [0.95, 0.5, 0.94], 1.5, 0, 1); },
+  table(g) { put(g, 'table_small', 0.85, 0.5, 0, 0.5); put(g, 'lamp_table', 0.6, 0.5, 0.85, 0.5); },
+  bookshelf(g) { put(g, 'cabinet_medium_decorated', [0.94, 0.94, 0.86], 1, 0, 0.47); },
+  cabinet(g) { put(g, 'cabinet_small_decorated', 0.86, 0.5, 0, 0.47); },
+  sofa(g) { put(g, 'couch_pillows', [0.65, 0.68, 0.6], 1, 0, 0.5); },
+  armchair(g) { put(g, 'armchair_pillows', [0.54, 0.64, 0.58], 0.5, 0, 0.5); },
+  bed(g) { put(g, 'bed_single_A', [0.6, 0.64, 0.65], 0.5, 0, 1); },
+  painting(g) { put(g, 'pictureframe_large_A', 0.85, 0.5, 2.3, 0); },
+  shelf(g) { put(g, 'shelf_B_large_decorated', 0.9, 1, 2.35, 0); },
   desk(g) {
-    g.add(box(1.84, 0.08, 0.84, WOOD, 1, 0.74, 0.5, 0.03));
-    for (const x of [0.16, 1.84]) for (const z of [0.16, 0.84]) g.add(box(0.08, 0.74, 0.08, WOOD_D, x, 0, z, 0.02));
-    g.add(box(0.5, 0.22, 0.72, WOOD_D, 1.5, 0.52, 0.5, 0.03), sph(0.03, CREAM, 1.5, 0.63, 0.87));
+    put(g, 'table_medium_long', [0.64, 0.82, 0.42], 1, 0, 0.5);
     g.add(box(0.46, 0.025, 0.32, '#d9dce6', 0.92, 0.82, 0.56, 0.01));
     const scr = box(0.46, 0.3, 0.02, '#4a4d68', 0.92, 0.84, 0.4, 0.008); scr.rotation.x = -0.18; g.add(scr);
     const lit = box(0.4, 0.24, 0.006, '#bfe6f5', 0.92, 0.87, 0.413, 0.002, glow('#9fd8f0', 0.9)); lit.rotation.x = -0.18; g.add(lit);
@@ -239,60 +271,9 @@ const BUILD = {
     const b2 = box(0.28, 0.05, 0.22, BOOKS[2], 0.34, 0.87, 0.5, 0.01); b2.rotation.y = 0.25; g.add(b2);
     g.add(cyl(0.05, 0.04, 0.12, '#8c9cea', 0.3, 0.82, 0.2), cyl(0.008, 0.008, 0.16, '#ffc98a', 0.29, 0.86, 0.2), cyl(0.008, 0.008, 0.17, '#ee8a8f', 0.32, 0.86, 0.21));
   },
-  chair(g) {
-    for (const x of [0.3, 0.7]) for (const z of [0.3, 0.7]) g.add(cyl(0.025, 0.02, 0.42, WOOD_DD, x, 0, z));
-    g.add(box(0.52, 0.09, 0.52, '#f0a585', 0.5, 0.42, 0.5, 0.04));
-    g.add(box(0.52, 0.5, 0.09, '#e58d6b', 0.5, 0.5, 0.74, 0.04));
-  },
-  plant(g) {
-    g.add(cyl(0.21, 0.15, 0.3, '#eba07c', 0.5, 0, 0.5), cyl(0.23, 0.23, 0.05, '#f3b190', 0.5, 0.28, 0.5), cyl(0.19, 0.19, 0.02, '#6b4a36', 0.5, 0.32, 0.5));
-    g.add(sph(0.26, '#7cc47c', 0.5, 0.62, 0.5), sph(0.19, '#66b06a', 0.33, 0.52, 0.58), sph(0.2, '#66b06a', 0.68, 0.54, 0.44), sph(0.17, '#93d48e', 0.54, 0.86, 0.48), sph(0.13, '#93d48e', 0.4, 0.78, 0.4));
-  },
-  tree(g) {
-    g.add(cyl(0.25, 0.19, 0.42, CREAM, 0.5, 0, 0.5), cyl(0.21, 0.21, 0.02, '#6b4a36', 0.5, 0.41, 0.5), cyl(0.04, 0.055, 1.0, WOOD_DD, 0.5, 0.4, 0.5));
-    g.add(sph(0.4, '#58a877', 0.5, 1.58, 0.5), sph(0.3, '#4a9869', 0.26, 1.3, 0.6), sph(0.3, '#4a9869', 0.76, 1.34, 0.4), sph(0.26, '#74c08c', 0.52, 1.96, 0.5), sph(0.2, '#74c08c', 0.7, 1.72, 0.66));
-  },
-  rug(g) {
-    const flat = (w, d, c, y) => { const m = box(w, 0.02, d, c, 1.5, y, 1, 0.01); m.castShadow = false; return m; };
-    g.add(flat(2.84, 1.84, '#ee9aa0', 0), flat(2.56, 1.56, '#fbe3d6', 0.006), flat(2.36, 1.36, '#f3aeb0', 0.012));
-  },
   lamp(g) {
-    g.add(cyl(0.17, 0.19, 0.04, INK, 0.5, 0, 0.5), cyl(0.018, 0.018, 1.45, INK, 0.5, 0.04, 0.5));
-    g.add(cyl(0.15, 0.27, 0.34, '#ffe6b3', 0.5, 1.38, 0.5, glow('#ffb860', 0.55)));
-    g.userData.lampAt = new THREE.Vector3(0.5, 1.3, 0.5);
-  },
-  table(g) {
-    g.add(cyl(0.22, 0.24, 0.03, WOOD_D, 0.5, 0, 0.5), cyl(0.045, 0.045, 0.42, WOOD_D, 0.5, 0.03, 0.5), cyl(0.42, 0.42, 0.05, WOOD, 0.5, 0.44, 0.5));
-    g.add(sph(0.1, CREAM, 0.42, 0.57, 0.48, 1, 0.85, 1), cyl(0.03, 0.03, 0.03, '#ee8a8f', 0.42, 0.65, 0.48), cyl(0.05, 0.04, 0.07, CREAM, 0.66, 0.49, 0.6));
-  },
-  bookshelf(g) {
-    g.add(box(1.84, 2.1, 0.05, WOOD_DD, 1, 0, 0.1, 0.01));
-    for (const x of [0.11, 1.89]) g.add(box(0.06, 2.1, 0.42, WOOD_D, x, 0, 0.3, 0.02));
-    for (let r = 0; r < 5; r++) g.add(box(1.84, 0.05, 0.42, WOOD_D, 1, r < 4 ? r * 0.5 : 2.05, 0.3, 0.02));
-    let i = 0;
-    for (let r = 0; r < 4; r++) {
-      let x = 0.18;
-      while (x < 1.7) {
-        i++;
-        const w = 0.06 + ((i * 5) % 4) * 0.02, h = 0.28 + ((i * 7) % 5) * 0.03;
-        if ((i * 3) % 11 === 0) { x += 0.2; continue; } // 留空隙
-        g.add(box(w, h, 0.28, BOOKS[(i * 3 + r) % BOOKS.length], x + w / 2, r * 0.5 + 0.05, 0.32, 0.01));
-        x += w + 0.012;
-      }
-    }
-    g.add(sph(0.11, '#7cc47c', 1.55, 2.3, 0.3), cyl(0.09, 0.07, 0.14, CREAM, 1.55, 2.1, 0.3));
-  },
-  sofa(g) {
-    g.add(box(1.9, 0.3, 0.82, '#8fa4e6', 1, 0.08, 0.5, 0.1), box(1.9, 0.6, 0.24, '#7e94dc', 1, 0.3, 0.16, 0.1));
-    for (const x of [0.13, 1.87]) g.add(box(0.24, 0.5, 0.82, '#7e94dc', x, 0.08, 0.5, 0.1));
-    for (const x of [0.63, 1.37]) g.add(box(0.7, 0.14, 0.54, '#a6b8f0', x, 0.36, 0.58, 0.06));
-    const p = box(0.32, 0.32, 0.12, '#ffc98a', 0.5, 0.5, 0.38, 0.05); p.rotation.set(-0.25, 0, 0.15); g.add(p);
-    for (const x of [0.2, 1.8]) for (const z of [0.2, 0.8]) g.add(cyl(0.035, 0.03, 0.08, WOOD_DD, x, 0, z));
-  },
-  bed(g) {
-    g.add(box(0.96, 0.25, 1.96, WOOD_D, 0.5, 0.05, 1, 0.04), box(0.96, 0.8, 0.1, WOOD_DD, 0.5, 0.05, 0.07, 0.04));
-    g.add(box(0.86, 0.18, 1.8, CREAM, 0.5, 0.3, 1.04, 0.06), box(0.6, 0.11, 0.34, '#ffffff', 0.5, 0.47, 0.36, 0.05));
-    g.add(box(0.92, 0.2, 1.14, '#9cc3e4', 0.5, 0.31, 1.38, 0.08), box(0.92, 0.07, 0.22, '#c6e0f5', 0.5, 0.5, 0.86, 0.03));
+    put(g, 'lamp_standing', 0.68, 0.5, 0, 0.5);
+    g.userData.lampAt = new THREE.Vector3(0.5, 1.35, 0.5);
   },
   aquarium(g) {
     g.add(box(0.82, 0.5, 0.52, INK, 0.5, 0, 0.5, 0.03), box(0.72, 0.05, 0.42, '#ecd9a8', 0.5, 0.5, 0.5, 0.01));
@@ -340,15 +321,6 @@ const BUILD = {
     g.add(box(0.05, 1.3, 0.03, CREAM, 1, 1.6, 0.095, 0.005), box(1.5, 0.05, 0.03, CREAM, 1, 2.22, 0.095, 0.005), box(1.9, 0.06, 0.22, CREAM, 1, 1.44, 0.11, 0.02));
     const rod = cyl(0.02, 0.02, 2.0, WOOD_D, 1, 0, 0.14); rod.rotation.z = Math.PI / 2; rod.position.y = 3.1; g.add(rod);
     for (const x of [0.16, 1.84]) g.add(box(0.26, 1.72, 0.07, '#f7c9c4', x, 1.36, 0.14, 0.03));
-  },
-  painting(g) {
-    const art = canvasTex('art', 160, 208, (c, w, h) => {
-      const gr = c.createLinearGradient(0, 0, 0, h); gr.addColorStop(0, '#ffd9a8'); gr.addColorStop(0.6, '#ffb3a0'); c.fillStyle = gr; c.fillRect(0, 0, w, h);
-      c.fillStyle = '#fff3d0'; c.beginPath(); c.arc(104, 84, 24, 0, 7); c.fill();
-      c.fillStyle = '#9a8fd0'; c.beginPath(); c.moveTo(0, 150); c.quadraticCurveTo(50, 90, 100, 150); c.quadraticCurveTo(130, 120, 160, 146); c.lineTo(160, 208); c.lineTo(0, 208); c.fill();
-      c.fillStyle = '#6f69b0'; c.beginPath(); c.moveTo(0, 176); c.quadraticCurveTo(70, 140, 160, 180); c.lineTo(160, 208); c.lineTo(0, 208); c.fill();
-    });
-    g.add(box(0.72, 0.92, 0.05, CREAM, 0.5, 1.8, 0.03, 0.02), picture(0.58, 0.78, art, 0.5, 2.26, 0.06));
   },
   clock(g) {
     const face = (r, d, c, z) => { const m = cyl(r, r, d, c, 0.5, 0, 0); m.rotation.x = Math.PI / 2; m.position.set(0.5, 2.5, z); return m; };
@@ -489,7 +461,7 @@ function buildShell() {
 }
 const itemPos = (g, type, x, y) => g.position.set(x, 0, CATALOG[type].kind === 'wall' ? 0 : y);
 function rebuildRoom() {
-  if (!room) return;
+  if (!room || !MODEL[MODEL_NAMES[0]]) return;
   if (!floorMesh) buildShell();
   const [wc, wt] = WALLS[room.wall] || WALLS[0];
   wallMats[0].color.set(wc); wallMats[1].color.set(wt);
@@ -914,6 +886,7 @@ function buildCatalog() {
   refreshCatalog();
 }
 function refreshCatalog() {
+  if (!profile) return;
   document.querySelectorAll('.item').forEach((card) => {
     const d = CATALOG[card.dataset.type], own = owns(card.dataset.type);
     card.classList.toggle('locked', !own);
