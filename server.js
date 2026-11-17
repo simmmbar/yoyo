@@ -29,7 +29,7 @@ const CATALOG = {
   armchair:  { name: '單人沙發', price: 70,  w: 1, h: 1, kind: 'floor' },
   sofa:      { name: '沙發',     price: 80,  w: 2, h: 1, kind: 'floor' },
   bed:       { name: '床',       price: 100, w: 1, h: 2, kind: 'floor' },
-  aquarium:  { name: '魚缸',     price: 120, w: 1, h: 1, kind: 'floor' },
+  tv:        { name: '電視',     price: 120, w: 1, h: 1, kind: 'floor' },
   cat:       { name: '貓咪',     price: 200, w: 1, h: 1, kind: 'floor' },
 };
 const AVATAR_RANGES = { skin: 5, hair: 6, hairColor: 7, shirt: 8, acc: 5 };
@@ -43,6 +43,9 @@ const loadJson = (f) => {
 };
 const profiles = loadJson('profiles.json'); // key(sha256 of token) -> profile
 const rooms = loadJson('rooms.json');       // code -> room
+// 舊存檔相容:魚缸已改為電視
+for (const r of Object.values(rooms)) for (const it of r.items || []) if (it.type === 'aquarium') it.type = 'tv';
+for (const p of Object.values(profiles)) p.owned = (p.owned || []).map((t) => (t === 'aquarium' ? 'tv' : t));
 let dirty = false;
 const markDirty = () => { dirty = true; };
 function flush() {

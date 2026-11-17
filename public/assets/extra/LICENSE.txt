@@ -1,6 +1,7 @@
 All files in this folder are licensed CC0 1.0 Universal (public domain).
 http://creativecommons.org/publicdomain/zero/1.0/
 
-wallWindow.glb   Furniture Kit 2.0 by Kenney (www.kenney.nl)
+wallWindow.glb, televisionVintage.glb, cabinetTelevision.glb
+                 Furniture Kit 2.0 by Kenney (www.kenney.nl)
 cat.glb          Animated animals by Quaternius (quaternius.com)
 wall_clock.*     "Wall Clock" by PierreB3D, Poly Haven (polyhaven.com/a/wall_clock)

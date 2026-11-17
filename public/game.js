@@ -239,12 +239,13 @@ const modelsReady = Promise.all(MODEL_NAMES.map((n) => new GLTFLoader().loadAsyn
     o.material.roughness = 0.85; o.material.metalness = 0;
   });
   MODEL[n] = g.scene;
-})).concat(Object.entries({ window: 'wallWindow.glb', clock: 'wall_clock.gltf', cat: 'cat.glb' }).map(([n, f]) =>
+})).concat(Object.entries({ window: 'wallWindow.glb', clock: 'wall_clock.gltf', cat: 'cat.glb', tv: 'televisionVintage.glb', tvCabinet: 'cabinetTelevision.glb' }).map(([n, f]) =>
   new GLTFLoader().loadAsync('/assets/extra/' + f).then((g) => {
     g.scene.traverse((o) => {
       if (!o.isMesh) return;
       o.castShadow = o.receiveShadow = true;
       if (o.material.name === '_defaultMat') o.visible = false; // 窗戶模型附帶的牆板,用我們自己的牆
+      if (n.startsWith('tv') && o.material.name === 'wood') o.material.color.set('#c9794a');
       if (n === 'window') {
         // 只留窗框那一段高度(裁掉牆板上下的飾條);窗戶固定掛在同一高度,所以用水平裁切面即可
         o.material.clippingPlanes = [new THREE.Plane(new THREE.Vector3(0, 1, 0), -1.2), new THREE.Plane(new THREE.Vector3(0, -1, 0), 2.93)];
@@ -292,18 +293,11 @@ const BUILD = {
     put(g, 'lamp_standing', 0.68, 0.5, 0, 0.5);
     g.userData.lampAt = new THREE.Vector3(0.5, 1.35, 0.5);
   },
-  aquarium(g) {
-    g.add(box(0.82, 0.5, 0.52, INK, 0.5, 0, 0.5, 0.03), box(0.72, 0.05, 0.42, '#ecd9a8', 0.5, 0.5, 0.5, 0.01));
-    g.add(sph(0.05, '#66b06a', 0.3, 0.62, 0.45, 1, 2.2, 1), sph(0.04, '#93d48e', 0.37, 0.6, 0.52, 1, 1.8, 1));
-    const fish = [sph(0.05, '#ff9d7a', 0.5, 0.78, 0.5, 1.5, 1, 0.7), sph(0.04, '#ffc98a', 0.5, 0.68, 0.55, 1.5, 1, 0.7)];
-    g.add(...fish);
-    const glass = box(0.78, 0.5, 0.48, '#a9e2f5', 0.5, 0.5, 0.5, 0.03, { transparent: true, opacity: 0.32, roughness: 0.1 });
-    glass.castShadow = false; g.add(glass);
-    g.userData.anim = (t) => fish.forEach((f, i) => {
-      f.position.x = 0.5 + Math.sin(t / 1100 + i * 2.4) * 0.2;
-      f.position.y = 0.76 - i * 0.1 + Math.sin(t / 700 + i) * 0.02;
-    });
+  tv(g) {
+    put(g, 'tvCabinet', 1.2, 0.02, 0, 0.62);
+    put(g, 'tv', 1.6, 0.17, 0.372, 0.68);
   },
+
   cat(g) {
     const m = cloneSkinned(MODEL.cat);
     const bb = new THREE.Box3();
