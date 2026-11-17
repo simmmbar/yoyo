@@ -344,9 +344,9 @@ const server = http.createServer((req, res) => {
   const ad = /^\/vendor\/addons\/((?:[\w-]+\/)*[\w-]+\.js)$/.exec(url);
   if (ad) { hit = [null, 'text/javascript; charset=utf-8']; file = path.join(THREE_DIR, 'examples/jsm', ad[1]); }
   // 家具與角色模型(KayKit、Quaternius,皆為 CC0)
-  const as = /^\/assets\/(kaykit|characters)\/([\w-]+\.(gltf|glb|bin|png|txt))$/.exec(url);
+  const as = /^\/assets\/(kaykit|characters|extra)\/((?:textures\/)?[\w-]+\.(gltf|glb|bin|png|jpg|txt))$/.exec(url);
   if (as) {
-    const types = { gltf: 'model/gltf+json', glb: 'model/gltf-binary', bin: 'application/octet-stream', png: 'image/png', txt: 'text/plain; charset=utf-8' };
+    const types = { gltf: 'model/gltf+json', glb: 'model/gltf-binary', bin: 'application/octet-stream', png: 'image/png', jpg: 'image/jpeg', txt: 'text/plain; charset=utf-8' };
     hit = [null, types[as[3]]]; file = path.join(__dirname, 'public/assets', as[1], as[2]);
   }
   if (!hit) return res.writeHead(404).end('Not found');

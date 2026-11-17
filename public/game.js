@@ -151,6 +151,7 @@ const stage = $('#stage'), canvas = $('#game'), labels = $('#labels');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
 renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
 renderer.shadowMap.enabled = true;
+renderer.localClippingEnabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.12;
@@ -238,7 +239,23 @@ const modelsReady = Promise.all(MODEL_NAMES.map((n) => new GLTFLoader().loadAsyn
     o.material.roughness = 0.85; o.material.metalness = 0;
   });
   MODEL[n] = g.scene;
-})));
+})).concat(Object.entries({ window: 'wallWindow.glb', clock: 'wall_clock.gltf', cat: 'cat.glb' }).map(([n, f]) =>
+  new GLTFLoader().loadAsync('/assets/extra/' + f).then((g) => {
+    g.scene.traverse((o) => {
+      if (!o.isMesh) return;
+      o.castShadow = o.receiveShadow = true;
+      if (o.material.name === '_defaultMat') o.visible = false; // 窗戶模型附帶的牆板,用我們自己的牆
+      if (n === 'window') {
+        // 只留窗框那一段高度(裁掉牆板上下的飾條);窗戶固定掛在同一高度,所以用水平裁切面即可
+        o.material.clippingPlanes = [new THREE.Plane(new THREE.Vector3(0, 1, 0), -1.2), new THREE.Plane(new THREE.Vector3(0, -1, 0), 2.93)];
+        if (o.material.name === 'wood') o.material.color.set('#c9794a');
+        if (o.material.name === 'glass') { o.material.opacity = 0.12; o.castShadow = false; }
+      }
+      if (n !== 'clock') { o.material.roughness = 0.85; o.material.metalness = 0; }
+      if (o.isSkinnedMesh) o.frustumCulled = false;
+    });
+    MODEL[n] = g.scene; MODEL[n + 'Clips'] = g.animations;
+  }))));
 function put(g, name, s, x, y, z, ry = 0) {
   const o = MODEL[name].clone();
   if (Array.isArray(s)) o.scale.set(...s); else o.scale.setScalar(s);
@@ -288,17 +305,21 @@ const BUILD = {
     });
   },
   cat(g) {
-    const c = '#f5b877', d = '#e9a25e';
-    g.add(sph(0.2, c, 0.5, 0.17, 0.44, 1.05, 0.85, 1.3), sph(0.17, c, 0.5, 0.36, 0.64), sph(0.09, '#fdeacf', 0.5, 0.14, 0.62, 1.2, 0.8, 1));
-    for (const s of [-1, 1]) {
-      const ear = cone(0.06, 0.11, d, 0.5 + s * 0.1, 0.47, 0.64); ear.rotation.z = -s * 0.25; g.add(ear);
-      g.add(sph(0.022, '#3b2f3a', 0.5 + s * 0.065, 0.38, 0.795), sph(0.05, c, 0.5 + s * 0.1, 0.03, 0.66, 1, 0.6, 1.4));
+    const m = cloneSkinned(MODEL.cat);
+    const bb = new THREE.Box3();
+    m.updateMatrixWorld(true);
+    m.traverse((o) => { if (o.isSkinnedMesh) { o.computeBoundingBox(); bb.union(o.boundingBox.clone().applyMatrix4(o.matrixWorld)); } });
+    const k = 0.8 / (bb.max.y - bb.min.y || 1);
+    m.scale.setScalar(k); m.position.set(0.5, -bb.min.y * k, 0.45); m.rotation.y = 0.5;
+    g.add(m);
+    const clip = MODEL.catClips.find((c) => /Idle$/.test(c.name));
+    if (clip) {
+      const mixer = new THREE.AnimationMixer(m);
+      mixer.clipAction(clip).play();
+      g.userData.anim = (t) => mixer.setTime(t / 1000);
     }
-    g.add(sph(0.016, '#ee8a8f', 0.5, 0.34, 0.805));
-    const tail = new THREE.Group(); tail.position.set(0.5, 0.12, 0.22);
-    const tm = mesh(geo('cap.04,.3', () => new THREE.CapsuleGeometry(0.04, 0.3, 6, 12)), mat(d), 0, 0.17, 0); tail.add(tm); g.add(tail);
-    g.userData.anim = (t) => { tail.rotation.z = Math.sin(t / 600) * 0.5; tail.rotation.x = -0.5; };
   },
+
   window(g) {
     const hr = new Date().getHours() + new Date().getMinutes() / 60;
     const mode = hr < 6 || hr >= 19 ? 'night' : (hr >= 17 || hr < 7.5) ? 'dusk' : 'day';
@@ -317,22 +338,28 @@ const BUILD = {
         for (const [x, y, r] of [[60, 80, 22], [88, 70, 28], [118, 82, 20], [150, 150, 16], [172, 144, 20]]) { c.beginPath(); c.arc(x, y, r, 0, 7); c.fill(); }
       }
     });
-    g.add(box(1.7, 1.5, 0.08, CREAM, 1, 1.5, 0.04, 0.03), picture(1.5, 1.3, sky, 1, 2.25, 0.085));
-    g.add(box(0.05, 1.3, 0.03, CREAM, 1, 1.6, 0.095, 0.005), box(1.5, 0.05, 0.03, CREAM, 1, 2.22, 0.095, 0.005), box(1.9, 0.06, 0.22, CREAM, 1, 1.44, 0.11, 0.02));
-    const rod = cyl(0.02, 0.02, 2.0, WOOD_D, 1, 0, 0.14); rod.rotation.z = Math.PI / 2; rod.position.y = 3.1; g.add(rod);
-    for (const x of [0.16, 1.84]) g.add(box(0.26, 1.72, 0.07, '#f7c9c4', x, 1.36, 0.14, 0.03));
+    // Kenney 的窗框(直立窗),左右各一扇,後面襯一片天空
+    const S = 2.3;
+    for (const cx of [0.55, 1.45]) {
+      put(g, 'window', S, cx - 0.4977 * S, 1.3 - 0.3927 * S, 0.04 * S);
+      g.add(picture(0.37 * S, 0.66 * S, sky, cx, 1.3 + 0.33 * S, 0.012));
+    }
   },
+
   clock(g) {
-    const face = (r, d, c, z) => { const m = cyl(r, r, d, c, 0.5, 0, 0); m.rotation.x = Math.PI / 2; m.position.set(0.5, 2.5, z); return m; };
-    g.add(face(0.32, 0.06, INK, 0.03), face(0.27, 0.07, CREAM, 0.035));
-    const hand = (len, w, c) => { const p = new THREE.Group(); p.position.set(0.5, 2.5, 0.08); p.add(box(w, len, 0.012, c, 0, 0, 0, 0.004)); g.add(p); return p; };
-    const hh = hand(0.14, 0.03, INK), mm = hand(0.22, 0.02, INK);
-    g.add(sph(0.025, '#ee8a8f', 0.5, 2.5, 0.085));
+    const m = put(g, 'clock', 1.9, 0.5, 2.5, 0.01);
+    const hand = (name) => m.getObjectByName(name);
+    const mm = hand('wall_clock_minute_hand'), hh = hand('wall_clock_hours_hand'), ss = hand('wall_clock_second_hand');
+    // 模型裡指針的原始指向(從 12 點順時針的弧度),轉到現在時間
+    const M0 = 1.01, H0 = -1.05, S0 = 3.0;
     g.userData.anim = () => {
-      const d = new Date(), m = d.getMinutes() + d.getSeconds() / 60;
-      mm.rotation.z = -(m / 60) * Math.PI * 2; hh.rotation.z = -((d.getHours() % 12 + m / 60) / 12) * Math.PI * 2;
+      const d = new Date(), sec = d.getSeconds(), min = d.getMinutes() + sec / 60, hr = (d.getHours() % 12) + min / 60;
+      if (mm) mm.rotation.z = -((min / 60) * Math.PI * 2 - M0);
+      if (hh) hh.rotation.z = -((hr / 12) * Math.PI * 2 - H0);
+      if (ss) ss.rotation.z = -((sec / 60) * Math.PI * 2 - S0);
     };
   },
+
 };
 function buildItem(type) {
   const g = new THREE.Group();
@@ -605,6 +632,7 @@ new ResizeObserver(fitCamera).observe(stage);
 // 縮圖(家具卡片、角色預覽)
 const thumb = new THREE.WebGLRenderer({ antialias: true, alpha: true });
 thumb.setSize(256, 256, false);
+thumb.localClippingEnabled = true;
 thumb.toneMapping = THREE.ACESFilmicToneMapping; thumb.toneMappingExposure = 1.12;
 const thumbScene = new THREE.Scene(), thumbCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 100);
 addLights(thumbScene, false);

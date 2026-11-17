@@ -48,4 +48,7 @@ public/game.js     3D 場景(three.js)、連線、計時、佈置、聊天、環
 
 - 家具模型:[KayKit Furniture Bits](https://github.com/KayKit-Game-Assets/KayKit-Furniture-Bits-1.0)(作者 Kay Lousberg,www.kaylousberg.com),CC0。檔案在 `public/assets/kaykit/`。
 - 角色模型與動畫:Ultimate Animated Character Pack(作者 Quaternius,quaternius.com),CC0。檔案在 `public/assets/characters/`。
-- 各資料夾內有 `LICENSE.txt`。窗戶、時鐘、魚缸、貓咪為程式繪製。
+- 窗戶:Furniture Kit 2.0(作者 Kenney,kenney.nl),CC0。
+- 貓咪:Quaternius 的動物模型,CC0。
+- 時鐘:Poly Haven 的「Wall Clock」(作者 PierreB3D),CC0。以上三項在 `public/assets/extra/`。
+- 各資料夾內有 `LICENSE.txt`。魚缸仍為程式繪製。
