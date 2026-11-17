@@ -685,7 +685,7 @@ let view = store.get('yoyo_view') || 'desk', autoIdx = 0, autoAt = 0, activeView
 const myPos = () => { const p = players.get(me); return p ? new THREE.Vector3(p.x, 0, p.y) : new THREE.Vector3(COLS / 2, 0, ROWS / 2); };
 const VIEWS = {
   room: { yaw: 45, pitch: 27, dist: () => roomDist, target: () => new THREE.Vector3(COLS / 2 - 0.3, 1.2, ROWS / 2 - 0.3) },
-  desk: { yaw: 24, pitch: 13, dist: () => 8.5, target: () => myPos().add(new THREE.Vector3(0, 1.05, 0.2)) },
+  desk: { yaw: 24, pitch: 13, dist: () => 8.5 * Math.max(1, 1.25 / camera.aspect), target: () => myPos().add(new THREE.Vector3(camera.aspect < 1 ? -0.3 : 0, camera.aspect < 1 ? 0.4 : 1.05, 0.2)) },
   side: { yaw: 68, pitch: 18, dist: () => 11, target: () => myPos().add(new THREE.Vector3(-0.4, 0.95, 0)) },
 };
 const AUTO = ['desk', 'room', 'side'];

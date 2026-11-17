@@ -255,8 +255,15 @@ body.focusing #timerSetup, body.focusing #modes, body.focusing #poses { display:
   h1 { display: none; }
   .hud { padding: 8px; gap: 6px; }
   .views { margin-left: 0; }
-  .widgets { left: 8px; top: 92px; width: 200px; bottom: 110px; }
-  #timerText { font-size: 40px; }
+  .widgets { left: 8px; top: 92px; width: 156px; bottom: 110px; }
+  .card { padding: 8px; gap: 6px; border-radius: 16px; }
+  #timerText { font-size: 32px; }
+  #timerLabel, #poses, .mini { display: none; }
+  .seg button { padding: 3px 4px; font-size: 12px; }
+  .setup { font-size: 12px; gap: 4px; }
+  .setup input { width: 40px; }
+  #statusInput { font-size: 12px; padding: 4px 8px; }
+  #focusBtn { padding: 6px; font-size: 14px; }
   #todoCard, #musicCard { display: none; }
   #drawer { left: 8px; right: 8px; top: auto; bottom: 8px; width: auto; height: 62vh; }
   #tabs button { padding: 7px 11px; font-size: 13px; }
