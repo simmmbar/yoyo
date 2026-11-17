@@ -523,10 +523,107 @@ function syncGhost() {
   ghostPad.visible = false;
 }
 
+
+// ---------- 風格化後製(?style=ink|riso|bit|psx) ----------
+const STYLE = new URLSearchParams(location.search).get('style');
+const MODES = { ink: 1, riso: 2, bit: 3, psx: 4 };
+let post = null;
+if (MODES[STYLE]) {
+  const mk = (depth) => {
+    const rt = new THREE.WebGLRenderTarget(4, 4, { type: THREE.HalfFloatType });
+    if (STYLE === 'psx') rt.texture.minFilter = rt.texture.magFilter = THREE.NearestFilter;
+    if (depth) rt.depthTexture = new THREE.DepthTexture(4, 4);
+    return rt;
+  };
+  const rtC = mk(false), rtN = mk(true);
+  const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({
+    uniforms: { tC: { value: rtC.texture }, tN: { value: rtN.texture }, tD: { value: rtN.depthTexture }, res: { value: new THREE.Vector2() }, mode: { value: MODES[STYLE] } },
+    vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0., 1.); }',
+    fragmentShader: `
+      precision highp float;
+      uniform sampler2D tC, tN, tD; uniform vec2 res; uniform int mode; varying vec2 vUv;
+      vec3 srgb(vec3 c){ return pow(clamp(c, 0., 1.), vec3(1. / 2.2)); }
+      float lum(vec3 c){ return dot(c, vec3(.299, .587, .114)); }
+      float b2(vec2 a){ a = floor(a); return fract(a.x / 2. + a.y * a.y * .75); }
+      float bayer(vec2 a){ return b2(.5 * a) * .25 + b2(a); }
+      float hash(vec2 p){ return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+      float edge(float w){
+        vec2 d = w / res; float e = 0.;
+        vec4 n0 = texture2D(tN, vUv); float z0 = texture2D(tD, vUv).r;
+        for (int i = 0; i < 4; i++) {
+          vec2 o = i == 0 ? vec2(d.x, 0.) : i == 1 ? vec2(-d.x, 0.) : i == 2 ? vec2(0., d.y) : vec2(0., -d.y);
+          vec4 n = texture2D(tN, vUv + o);
+          e = max(e, length(n - n0) * 1.4);
+          e = max(e, abs(texture2D(tD, vUv + o).r - z0) * 260.);
+        }
+        return smoothstep(.35, .7, e);
+      }
+      float dots(vec2 p, float ang, float size, float cov){
+        float c = cos(ang), s = sin(ang); p = mat2(c, -s, s, c) * p / size;
+        return smoothstep(.06, -.06, length(fract(p) - .5) - sqrt(clamp(cov, 0., 1.)) * .72);
+      }
+      void main(){
+        vec4 t = texture2D(tC, vUv); float a = t.a; vec3 c = srgb(t.rgb * 1.05);
+        vec2 fc = gl_FragCoord.xy; float scale = res.y / 780.;
+        if (mode == 1) {            // 墨線:平塗色塊 + 黑描邊
+          float l = lum(c), q = (floor(l * 3.5 + .6)) / 3.5;
+          vec3 fl = clamp(c * (q / max(l, .001)), 0., 1.);
+          fl = mix(vec3(lum(fl)), fl, 1.15) * vec3(1., .97, .9);
+          vec3 paper = vec3(.953, .918, .835) - hash(floor(fc / scale)) * .03;
+          vec3 o = mix(paper, fl, a);
+          o = mix(o, vec3(.14, .12, .17), edge(1.6 * scale));
+          gl_FragColor = vec4(o, 1.);
+        } else if (mode == 2) {     // 孔版印刷:三色網點疊印 + 錯位
+          vec3 c2 = srgb(texture2D(tC, vUv + vec2(3., -2.) * scale / res).rgb * 1.05);
+          float a2 = texture2D(tC, vUv + vec2(3., -2.) * scale / res).a;
+          float blue = mix(.0, 1. - lum(c), a) * 1.15;
+          float pink = mix(.0, clamp((c2.r - c2.b) * 1.6 + (1. - lum(c2)) * .15, 0., 1.), a2);
+          float yel = mix(.0, clamp((min(c.r, c.g) - c.b) * 2.2, 0., 1.), a);
+          vec2 p = fc / scale;
+          vec3 o = vec3(.965, .94, .88);
+          o *= mix(vec3(1.), vec3(1., .91, .0), dots(p, .26, 5., yel) * .9);
+          o *= mix(vec3(1.), vec3(1., .28, .69), dots(p, 1.3, 5., pink) * .92);
+          o *= mix(vec3(1.), vec3(.2, .33, .64), dots(p, .78, 5., blue * blue) * .95);
+          o *= mix(vec3(1.), vec3(.2, .33, .64), edge(1.4 * scale) * .9);
+          o += (hash(p) - .5) * .07;
+          gl_FragColor = vec4(o, 1.);
+        } else if (mode == 3) {     // 1-bit 抖色
+          float l = mix(.06 + step(.992, hash(floor(fc / (2. * scale)))) , lum(c) * 1.1 - .08, a);
+          float on = step(bayer(floor(fc / (2. * scale))), l);
+          on *= 1. - edge(1.6 * scale);
+          gl_FragColor = vec4(mix(vec3(.12, .13, .22), vec3(.94, .9, .8), on), 1.);
+        } else {                    // PS1:低解析度 + 色彩量化
+          c += (bayer(floor(vUv * res)) - .5) / 14.;
+          c = floor(c * 16. + .5) / 16.;
+          gl_FragColor = vec4(c * a, a);
+        }
+      }`,
+  }));
+  quad.frustumCulled = false;
+  const qScene = new THREE.Scene(); qScene.add(quad);
+  const qCam = new THREE.Camera(), normalMat = new THREE.MeshNormalMaterial();
+  post = {
+    resize(w, h) {
+      const k = STYLE === 'psx' ? 300 / h : renderer.getPixelRatio();
+      const W = Math.max(2, Math.round(w * k)), H = Math.max(2, Math.round(h * k));
+      rtC.setSize(W, H); rtN.setSize(W, H);
+      quad.material.uniforms.res.value.set(W, H);
+    },
+    render() {
+      renderer.setRenderTarget(rtC); renderer.setClearColor(0x000000, 0); renderer.clear(); renderer.render(scene, camera);
+      scene.overrideMaterial = normalMat;
+      renderer.setRenderTarget(rtN); renderer.clear(); renderer.render(scene, camera);
+      scene.overrideMaterial = null;
+      renderer.setRenderTarget(null); renderer.render(qScene, qCam);
+    },
+  };
+}
+
 // ---------- 相機 ----------
 function fitCamera() {
   const w = stage.clientWidth || 1, h = stage.clientHeight || 1;
   renderer.setSize(w, h, false);
+  post?.resize(w, h);
   const target = new THREE.Vector3(COLS / 2, 1.2, ROWS / 2);
   camera.position.copy(target).addScaledVector(VIEW_DIR, 40);
   camera.lookAt(target); camera.updateMatrixWorld();
@@ -661,7 +758,7 @@ function frame(t) {
       else { ghostPad.rotation.set(-Math.PI / 2, 0, 0); ghostPad.scale.set(d.w, d.h, 1); ghostPad.position.set(hover.x + d.w / 2, 0.05, hover.y + d.h / 2); }
     }
   }
-  renderer.render(scene, camera);
+  if (post) post.render(); else renderer.render(scene, camera);
   tickTimer(t);
 }
 
