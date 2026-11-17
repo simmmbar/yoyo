@@ -1,0 +1,14 @@
+# Render 藍圖:在 Render 上選「New > Blueprint」並接上這個倉庫即可部署。
+# 免費方案沒有持久化磁碟,服務重啟或重新部署後存檔會清空;
+# 要保留存檔請改用付費方案、掛上磁碟並把 DATA_DIR 指到掛載路徑。
+services:
+  - type: web
+    name: yoyo-focus-room
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_VERSION
+        value: "22"

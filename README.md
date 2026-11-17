@@ -33,6 +33,8 @@ npm start
 
 這是一個單一 Node 行程(HTTP + WebSocket),可部署到任何支援 WebSocket 的平台(Render、Railway、Fly.io、自己的 VPS 等),啟動指令為 `npm start`。
 
+倉庫附有 Render 的設定檔 `render.yaml`:在 Render 選「New > Blueprint」接上這個倉庫就能部署(免費方案閒置後會休眠,且存檔不會保留)。
+
 存檔寫在 `DATA_DIR` 的 JSON 檔裡,部署時請把它指到**持久化磁碟**,否則重新部署後存檔會消失。純靜態主機(如 GitHub Pages)無法執行,因為需要伺服器。
 
 ## 結構
