@@ -246,6 +246,10 @@ const modelsReady = Promise.all(MODEL_NAMES.map((n) => new GLTFLoader().loadAsyn
       o.castShadow = o.receiveShadow = true;
       if (o.material.name === '_defaultMat') o.visible = false; // 窗戶模型附帶的牆板,用我們自己的牆
       if (n.startsWith('tv') && o.material.name === 'wood') o.material.color.set('#c9794a');
+      if (n === 'tv' && o.material.name === 'metal') { // 螢幕:自發光
+        o.material.color.set('#9fd4ee'); o.material.emissive.set('#7fc4f0'); o.material.emissiveIntensity = 0.9;
+        MODEL.tvScreen = o.material;
+      }
       if (n === 'window') {
         // 只留窗框那一段高度(裁掉牆板上下的飾條);窗戶固定掛在同一高度,所以用水平裁切面即可
         o.material.clippingPlanes = [new THREE.Plane(new THREE.Vector3(0, 1, 0), -1.2), new THREE.Plane(new THREE.Vector3(0, -1, 0), 2.93)];
@@ -296,6 +300,13 @@ const BUILD = {
   tv(g) {
     put(g, 'tvCabinet', 1.2, 0.02, 0, 0.62);
     put(g, 'tv', 1.6, 0.17, 0.372, 0.68);
+    // 像在播節目一樣,亮度與色調緩慢變化
+    g.userData.anim = (t) => {
+      const m = MODEL.tvScreen;
+      if (!m) return;
+      m.emissiveIntensity = 0.85 + Math.sin(t / 900) * 0.12 + Math.sin(t / 233) * 0.08;
+      m.emissive.setHSL(0.56 + Math.sin(t / 4000) * 0.06, 0.75, 0.62);
+    };
   },
 
   cat(g) {
