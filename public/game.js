@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 
 (() => {
 'use strict';
@@ -22,8 +23,7 @@ let COLS = 8, ROWS = 6, CATALOG = {};
 const SKIN = ['#ffe3d0', '#f8cdaa', '#e6ad84', '#bd8158', '#85573a'];
 const HAIRC = ['#3a3040', '#6b4630', '#b0733c', '#f0c466', '#ee8aa0', '#7f96e8', '#eeeaf4'];
 const SHIRT = ['#f08d94', '#ffc98a', '#9ed59a', '#7cc3d6', '#8c9cea', '#c09ae0', '#fbf6ec', '#56506e'];
-const HAIR_NAMES = ['短髮', '鮑伯', '長髮', '丸子', '刺蝟'];
-const ACC_NAMES = ['無', '眼鏡', '耳機', '毛帽', '貓耳'];
+const LOOK_NAMES = ['男生 A', '女生 A', '男生 B', '女生 B', '男生 C', '光頭'];
 const WALLS = [['#f6e6d2', '#fffaf0'], ['#d3e3d3', '#f7fbf2'], ['#ddd6f0', '#f8f5ff'], ['#f7d6d2', '#fff6f2'], ['#d2e3f2', '#f5faff'], ['#6a6c9a', '#8f90bd']];
 const FLOORS = [['#e0b081', '#cf9a68'], ['#a9744e', '#96623f'], ['#ecd9bd', '#dfc8a6'], ['#b9bfcc', '#a8aebd'], ['#c6d9c3', '#b3c9b0'], ['#85708a', '#745f79']];
 
@@ -340,73 +340,64 @@ function buildItem(type) {
   return g;
 }
 
-// ---------- 角色(Q 版) ----------
-function buildAvatar(a) {
+// ---------- 角色:Quaternius Ultimate Animated Character Pack(CC0) ----------
+const CHAR_FILES = ['Casual_Male', 'Casual_Female', 'Casual2_Male', 'Casual2_Female', 'Casual3_Male', 'Casual_Bald'];
+const AVATAR_H = 1.5;
+const charCache = new Map();
+function loadChar(i) {
+  if (!charCache.has(i)) charCache.set(i, new GLTFLoader().loadAsync(`/assets/characters/${CHAR_FILES[i]}.glb`).then((g) => {
+    g.scene.updateMatrixWorld(true);
+    const bb = new THREE.Box3();
+    g.scene.traverse((o) => {
+      if (!o.isSkinnedMesh) return;
+      o.computeBoundingBox(); bb.union(o.boundingBox.clone().applyMatrix4(o.matrixWorld));
+    });
+    return { scene: g.scene, clips: g.animations, scale: AVATAR_H / (bb.max.y - bb.min.y || 1), minY: bb.min.y };
+  }));
+  return charCache.get(i);
+}
+// 立刻回傳一個空群組,模型載入後再填入;皮膚、頭髮、上衣依材質名稱換色
+function buildAvatar(a, onReady) {
   const g = new THREE.Group();
-  const skin = SKIN[a.skin], hc = HAIRC[a.hairColor], shirt = SHIRT[a.shirt];
-  const cap = (r, len, c) => mesh(geo(`cap${r},${len}`, () => new THREE.CapsuleGeometry(r, len, 8, 16)), mat(c), 0, 0, 0);
-  const limb = (x, y, r, len, c, endC) => {
-    const p = new THREE.Group(); p.position.set(x, y, 0);
-    const m = cap(r, len, c); m.position.y = -len / 2 - r * 0.4; p.add(m);
-    if (endC) p.add(sph(r * 1.15, endC, 0, -len - r * 0.9, 0));
-    g.add(p); return p;
-  };
-  const legs = [limb(-0.1, 0.34, 0.075, 0.2, '#5b5a78', '#fbf6ec'), limb(0.1, 0.34, 0.075, 0.2, '#5b5a78', '#fbf6ec')];
-  const body = cap(0.2, 0.2, shirt); body.position.y = 0.52; g.add(body);
-  const arms = [limb(-0.25, 0.68, 0.058, 0.2, shirt, skin), limb(0.25, 0.68, 0.058, 0.2, shirt, skin)];
-  arms[0].rotation.z = -0.22; arms[1].rotation.z = 0.22;
-
-  const head = new THREE.Group(); head.position.y = 1.03; g.add(head);
-  head.add(sph(0.31, skin, 0, 0, 0, 1, 0.94, 0.96));
-  for (const s of [-1, 1]) {
-    head.add(sph(0.036, '#3b2f3a', s * 0.115, -0.01, 0.277, 1, 1.35, 0.6));
-    head.add(sph(0.012, '#ffffff', s * 0.105, 0.008, 0.297));
-    head.add(sph(0.05, '#ff9aa2', s * 0.2, -0.085, 0.215, 1, 0.6, 0.4, { transparent: true, opacity: 0.5 }));
-    head.add(sph(0.05, skin, s * 0.3, -0.03, 0, 0.6, 1, 0.8));
-  }
-  const dome = (r, theta, rx, c = hc) => {
-    const m = mesh(geo(`d${r},${theta}`, () => new THREE.SphereGeometry(r, 28, 18, 0, Math.PI * 2, 0, Math.PI * theta)), mat(c, { side: THREE.DoubleSide }), 0, 0, 0);
-    m.rotation.x = rx; return m;
-  };
-  head.add(dome(0.33, 0.47, -0.38)); // 基本髮型(瀏海線)
-  if (a.hair === 1 || a.hair === 2) head.add(dome(0.345, 0.66, -0.95));
-  if (a.hair === 2) head.add(box(0.56, 0.62, 0.22, hc, 0, -0.62, -0.2, 0.1));
-  if (a.hair === 3) for (const s of [-1, 1]) head.add(sph(0.13, hc, s * 0.25, 0.3, -0.06));
-  if (a.hair === 4) for (const [x, z, rz, rx] of [[0, 0, 0, 0], [-0.14, 0, 0.5, 0], [0.14, 0, -0.5, 0], [0, -0.14, 0, -0.5], [-0.1, -0.1, 0.4, -0.4], [0.1, -0.1, -0.4, -0.4], [0, 0.1, 0, 0.5]]) {
-    const k = cone(0.1, 0.22, hc, x, 0.22, z); k.rotation.set(rx, 0, rz); head.add(k);
-  }
-  if (a.acc === 1) {
-    for (const s of [-1, 1]) head.add(mesh(geo('gl', () => new THREE.TorusGeometry(0.07, 0.012, 8, 24)), mat('#3b2f3a'), s * 0.115, -0.01, 0.295));
-    head.add(box(0.07, 0.014, 0.014, '#3b2f3a', 0, -0.012, 0.3, 0.004));
-  }
-  if (a.acc === 2) {
-    head.add(mesh(geo('hp', () => new THREE.TorusGeometry(0.335, 0.026, 8, 28, Math.PI)), mat('#56506e'), 0, 0, 0));
-    for (const s of [-1, 1]) { const c = cyl(0.1, 0.1, 0.07, '#7cc3d6', 0, 0, 0); c.rotation.z = Math.PI / 2; c.position.set(s * 0.33, -0.02, 0); head.add(c); }
-  }
-  if (a.acc === 3) {
-    head.add(dome(0.345, 0.4, -0.2, '#ee8a8f'), sph(0.08, CREAM, 0, 0.36, -0.07));
-    const brim = mesh(geo('brim', () => new THREE.TorusGeometry(0.315, 0.045, 10, 28)), mat(CREAM), 0, 0.11, -0.03); brim.rotation.x = Math.PI / 2 - 0.2; head.add(brim);
-  }
-  if (a.acc === 4) for (const s of [-1, 1]) {
-    const e = cone(0.1, 0.17, hc, s * 0.18, 0.22, 0); e.rotation.z = -s * 0.3; head.add(e);
-    const inn = cone(0.055, 0.1, '#ffb3bb', s * 0.18, 0.24, 0.035); inn.rotation.z = -s * 0.3; head.add(inn);
-  }
-  const book = new THREE.Group(); book.position.set(0, 0.6, 0.3); book.rotation.x = 0.6;
-  for (const s of [-1, 1]) { const pg = box(0.17, 0.02, 0.22, CREAM, s * 0.085, 0, 0, 0.005); pg.rotation.z = s * 0.2; book.add(pg); }
-  book.add(box(0.36, 0.012, 0.24, '#ee8a8f', 0, -0.012, 0, 0.004));
-  book.visible = false; g.add(book);
-  g.userData = { legs, arms, head, book };
+  g.userData = { ready: false };
+  loadChar(a.hair % CHAR_FILES.length).then((c) => {
+    const m = cloneSkinned(c.scene);
+    m.scale.setScalar(c.scale); m.position.y = -c.minY * c.scale;
+    const tints = { Skin: SKIN[a.skin], Hair: HAIRC[a.hairColor], Shirt: SHIRT[a.shirt], Pants: '#5d5f86', Belt: '#3b3a4a', Face: '#3a2f3c' };
+    m.traverse((o) => {
+      if (!o.isMesh) return;
+      o.castShadow = o.receiveShadow = true; o.frustumCulled = false;
+      o.material = o.material.clone();
+      if (tints[o.material.name]) o.material.color.set(tints[o.material.name]);
+      o.material.roughness = 0.8; o.material.metalness = 0;
+    });
+    const mixer = new THREE.AnimationMixer(m), act = {};
+    for (const n of ['Idle', 'Walk', 'SitDown']) {
+      const clip = c.clips.find((k) => k.name === n);
+      if (clip) act[n] = mixer.clipAction(clip);
+    }
+    if (act.SitDown) { act.SitDown.loop = THREE.LoopOnce; act.SitDown.clampWhenFinished = true; }
+    act.Idle?.play(); mixer.update(0);
+    g.add(m);
+    // 專注坐下時,屁股底下的小凳子
+    const seat = MODEL.chair_stool ? put(g, 'chair_stool', 0.62, 0, 0, -0.12) : null;
+    if (seat) seat.visible = false;
+    g.userData = { ready: true, mixer, act, cur: 'Idle', seat };
+    onReady?.(g);
+  });
   return g;
 }
-function poseAvatar(g, t, walking, focusing) {
-  const { legs, arms, head, book } = g.userData;
-  const sw = walking ? Math.sin(t / 95) * 0.75 : 0;
-  legs[0].rotation.x = sw; legs[1].rotation.x = -sw;
-  book.visible = focusing;
-  if (focusing) { arms[0].rotation.x = arms[1].rotation.x = -1.15; head.rotation.x = 0.2; }
-  else { arms[0].rotation.x = -sw * 0.8; arms[1].rotation.x = sw * 0.8; head.rotation.x = 0; }
-  head.position.y = 1.03 + (walking ? 0 : Math.sin(t / 900) * 0.008);
-  return walking ? Math.abs(Math.sin(t / 95)) * 0.05 : 0;
+function poseAvatar(g, dt, walking, focusing) {
+  const u = g.userData;
+  if (!u.ready) return;
+  const want = walking ? 'Walk' : focusing && u.act.SitDown ? 'SitDown' : 'Idle';
+  if (want !== u.cur && u.act[want]) {
+    u.act[want].reset().fadeIn(0.2).play();
+    u.act[u.cur]?.fadeOut(0.2);
+    u.cur = want;
+  }
+  if (u.seat) u.seat.visible = u.cur === 'SitDown';
+  u.mixer.update(dt);
 }
 
 // ---------- 房間 ----------
@@ -629,8 +620,19 @@ function snapshot(obj, cv, dir = VIEW_DIR, zoom = 1) {
   c2.clearRect(0, 0, cv.width, cv.height); c2.drawImage(thumb.domElement, 0, 0, cv.width, cv.height);
 }
 const FRONT_DIR = new THREE.Vector3(0.35, 0.25, 1).normalize();
+let previewSeq = 0;
 function renderAvatarPreview() {
-  if (draft) snapshot(buildAvatar(draft.avatar), $('#avatarPreview'), FRONT_DIR, 1.05);
+  if (!draft) return;
+  const seq = ++previewSeq; // 只畫最後一次選擇
+  buildAvatar(draft.avatar, (g) => {
+    if (seq !== previewSeq) return;
+    const cv = $('#avatarPreview'), c2 = cv.getContext('2d');
+    thumbScene.add(g);
+    thumbCam.position.set(0, AVATAR_H * 0.52, 0).addScaledVector(FRONT_DIR, 20); thumbCam.lookAt(0, AVATAR_H * 0.52, 0);
+    Object.assign(thumbCam, { left: -0.95, right: 0.95, top: 0.95, bottom: -0.95 }); thumbCam.updateProjectionMatrix();
+    thumb.render(thumbScene, thumbCam); thumbScene.remove(g);
+    c2.clearRect(0, 0, cv.width, cv.height); c2.drawImage(thumb.domElement, 0, 0, cv.width, cv.height);
+  });
 }
 
 // ---------- 玩家物件與標籤 ----------
@@ -709,9 +711,10 @@ function frame(t) {
     diff = Math.atan2(Math.sin(diff), Math.cos(diff));
     p.obj.rotation.y += diff * Math.min(1, dt * 12);
     p.heading = p.obj.rotation.y;
-    p.obj.position.set(p.x, poseAvatar(p.obj, t + p.x * 400, walking, focusing), p.y);
+    p.obj.position.set(p.x, 0, p.y);
+    poseAvatar(p.obj, dt, walking, focusing);
     // 標籤
-    tmpV.set(p.x, 1.5, p.y).project(camera);
+    tmpV.set(p.x, AVATAR_H + 0.12, p.y).project(camera);
     p.el.style.transform = `translate(${((tmpV.x + 1) / 2) * sw}px, ${((1 - tmpV.y) / 2) * sh}px) translate(-50%, -100%)`;
     if (focusing) {
       const txt = fmt(p.focusEnd - t);
@@ -936,10 +939,9 @@ function pushProfile() {
 function buildAvatarOptions() {
   const rows = [
     ['膚色', 'skin', SKIN.map((c) => ({ color: c }))],
-    ['髮型', 'hair', HAIR_NAMES.map((n) => ({ text: n }))],
+    ['造型', 'hair', LOOK_NAMES.map((n) => ({ text: n }))],
     ['髮色', 'hairColor', HAIRC.map((c) => ({ color: c }))],
     ['上衣', 'shirt', SHIRT.map((c) => ({ color: c }))],
-    ['配件', 'acc', ACC_NAMES.map((n) => ({ text: n }))],
   ];
   $('#avatarOptions').replaceChildren(...rows.flatMap(([title, key, opts]) => [
     el('h3', { textContent: title }),

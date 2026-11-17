@@ -7,7 +7,7 @@
 - **多人同房間**:每個人有自己的房間與 6 碼房號,分享邀請連結即可即時看到彼此(每房最多 12 人)
 - **專注計時**:15 / 25 / 45 / 60 分鐘或自訂;每專注 1 分鐘得 1 金幣,計時在伺服器端,中途斷線回來仍會結算
 - **房間佈置**:20 種家具(含牆面掛飾)、6 種牆面與地板;金幣可解鎖新家具;房主可開放朋友一起佈置
-- **角色自訂**:膚色、髮型、髮色、上衣、配件
+- **角色自訂**:6 種造型,可換膚色、髮色、上衣;有走路、待機、坐下專注的動畫
 - **聊天與表情**:文字對話泡泡、表情符號
 - **雲端存檔**:進度存在伺服器,用「存檔碼」可在其他裝置接續
 - **環境音**:雨聲、白噪音、輕音樂(瀏覽器即時合成,不需音檔)
@@ -46,4 +46,6 @@ public/game.js     3D 場景(three.js)、連線、計時、佈置、聊天、環
 
 ## 素材授權
 
-家具模型來自 [KayKit Furniture Bits](https://github.com/KayKit-Game-Assets/KayKit-Furniture-Bits-1.0)(作者 Kay Lousberg,www.kaylousberg.com),以 CC0 授權釋出,檔案位於 `public/assets/kaykit/`,授權全文見該資料夾的 `LICENSE.txt`。窗戶、時鐘、魚缸、貓咪與角色為程式繪製。
+- 家具模型:[KayKit Furniture Bits](https://github.com/KayKit-Game-Assets/KayKit-Furniture-Bits-1.0)(作者 Kay Lousberg,www.kaylousberg.com),CC0。檔案在 `public/assets/kaykit/`。
+- 角色模型與動畫:Ultimate Animated Character Pack(作者 Quaternius,quaternius.com),CC0。檔案在 `public/assets/characters/`。
+- 各資料夾內有 `LICENSE.txt`。窗戶、時鐘、魚缸、貓咪為程式繪製。

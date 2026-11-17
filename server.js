@@ -32,7 +32,7 @@ const CATALOG = {
   aquarium:  { name: '魚缸',     price: 120, w: 1, h: 1, kind: 'floor' },
   cat:       { name: '貓咪',     price: 200, w: 1, h: 1, kind: 'floor' },
 };
-const AVATAR_RANGES = { skin: 5, hair: 5, hairColor: 7, shirt: 8, acc: 5 };
+const AVATAR_RANGES = { skin: 5, hair: 6, hairColor: 7, shirt: 8, acc: 5 };
 const THEME_COUNT = 6;
 const EMOTES = ['👋', '❤️', '😂', '👍', '🔥', '☕', '💤', '✨'];
 
@@ -343,11 +343,11 @@ const server = http.createServer((req, res) => {
   if (v) { hit = [null, 'text/javascript; charset=utf-8']; file = path.join(THREE_DIR, 'build', v[1]); }
   const ad = /^\/vendor\/addons\/((?:[\w-]+\/)*[\w-]+\.js)$/.exec(url);
   if (ad) { hit = [null, 'text/javascript; charset=utf-8']; file = path.join(THREE_DIR, 'examples/jsm', ad[1]); }
-  // 家具模型(KayKit Furniture Bits,CC0)
-  const as = /^\/assets\/kaykit\/([\w-]+\.(gltf|bin|png|txt))$/.exec(url);
+  // 家具與角色模型(KayKit、Quaternius,皆為 CC0)
+  const as = /^\/assets\/(kaykit|characters)\/([\w-]+\.(gltf|glb|bin|png|txt))$/.exec(url);
   if (as) {
-    const types = { gltf: 'model/gltf+json', bin: 'application/octet-stream', png: 'image/png', txt: 'text/plain; charset=utf-8' };
-    hit = [null, types[as[2]]]; file = path.join(__dirname, 'public/assets/kaykit', as[1]);
+    const types = { gltf: 'model/gltf+json', glb: 'model/gltf-binary', bin: 'application/octet-stream', png: 'image/png', txt: 'text/plain; charset=utf-8' };
+    hit = [null, types[as[3]]]; file = path.join(__dirname, 'public/assets', as[1], as[2]);
   }
   if (!hit) return res.writeHead(404).end('Not found');
   fs.readFile(file || path.join(__dirname, 'public', hit[0]), (err, buf) => {
