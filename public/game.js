@@ -148,7 +148,9 @@ const owns = (type) => CATALOG[type].price === 0 || profile.owned.includes(type)
 
 // ---------- 3D 場景 ----------
 const stage = $('#stage'), canvas = $('#game'), labels = $('#labels');
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+let renderer;
+try { renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true }); }
+catch (e) { throw new Error('WebGL unavailable: ' + e.message); }
 renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
 renderer.shadowMap.enabled = true;
 renderer.localClippingEnabled = true;
@@ -1100,6 +1102,7 @@ function chime() {
   } catch {}
 }
 
+window.__booted = true;
 connect();
 requestAnimationFrame(frame);
 })();

@@ -3,6 +3,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const zlib = require('zlib');
 const { WebSocketServer } = require('ws');
 
 const PORT = process.env.PORT || 3000;
@@ -353,12 +354,22 @@ const server = http.createServer((req, res) => {
     hit = [null, types[as[3]]]; file = path.join(__dirname, 'public/assets', as[1], as[2]);
   }
   if (!hit) return res.writeHead(404).end('Not found');
-  fs.readFile(file || path.join(__dirname, 'public', hit[0]), (err, buf) => {
+  // 模型與 three.js 內容不常變動,讓瀏覽器快取一天;文字類檔案用 gzip 壓縮後再送
+  const full = file || path.join(__dirname, 'public', hit[0]);
+  const headers = { 'Content-Type': hit[1], 'Cache-Control': file ? 'public, max-age=86400' : 'no-cache' };
+  const gz = /gzip/.test(req.headers['accept-encoding'] || '') && /javascript|html|css|json|octet-stream|plain/.test(hit[1]);
+  if (gz && GZ.has(full)) return res.writeHead(200, { ...headers, 'Content-Encoding': 'gzip', Vary: 'Accept-Encoding' }).end(GZ.get(full));
+  fs.readFile(full, (err, buf) => {
     if (err) return res.writeHead(err.code === 'ENOENT' ? 404 : 500).end('error');
-    res.writeHead(200, { 'Content-Type': hit[1], 'Cache-Control': 'no-cache' });
-    res.end(buf);
+    if (!gz) return res.writeHead(200, headers).end(buf);
+    zlib.gzip(buf, (e, out) => {
+      if (e) return res.writeHead(200, headers).end(buf);
+      if (file) GZ.set(full, out);
+      res.writeHead(200, { ...headers, 'Content-Encoding': 'gzip', Vary: 'Accept-Encoding' }).end(out);
+    });
   });
 });
+const GZ = new Map(); // 壓縮結果快取(只快取不會變動的 vendor / assets 檔案)
 
 const wss = new WebSocketServer({ server, maxPayload: 4096 });
 wss.on('connection', (ws) => {

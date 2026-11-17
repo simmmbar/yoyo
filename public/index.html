@@ -30,7 +30,7 @@
       <button id="editRemove" hidden>收回這件</button>
       <button id="editCancel">取消</button>
     </div>
-    <div id="overlay" hidden><div id="overlayText">連線中…</div></div>
+    <div id="overlay"><div id="overlayText">載入中…第一次開啟需要下載模型,請稍候</div></div>
   </section>
 
   <aside>
@@ -117,6 +117,21 @@
   </aside>
 </main>
 <div id="toasts"></div>
-<script type="module" src="game.js"></script>
+<script>
+// 載入失敗時把原因顯示出來,不要只留一片空白
+function bootFail(msg) {
+  var o = document.getElementById('overlay'), t = document.getElementById('overlayText');
+  if (!o || window.__booted) return;
+  o.hidden = false;
+  t.textContent = msg;
+}
+window.addEventListener('error', function (e) {
+  var m = String((e && e.message) || '');
+  bootFail(/webgl/i.test(m)
+    ? '這個瀏覽器無法啟用 WebGL(3D 繪圖)。請開啟瀏覽器設定裡的「硬體加速」,或改用最新版 Chrome / Edge / Safari。'
+    : '載入時發生錯誤,請重新整理頁面再試一次。(' + m + ')');
+});
+</script>
+<script type="module" src="game.js" onerror="bootFail('遊戲程式下載失敗,請檢查網路後重新整理頁面。')"></script>
 </body>
 </html>
