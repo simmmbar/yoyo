@@ -32,7 +32,7 @@ let ws, me = null, profile = null, room = null, kicked = false;
 const players = new Map();
 let holding = null; // 佈置中手上拿的家具 {type, fromId?}
 let hover = null;   // 滑鼠所在格
-let localFocusEnd = 0, selectedMin = 25;
+let selectedMin = 25, timerMode = 'pomo';
 let pendingRestore = null;
 
 function newToken() {
@@ -67,12 +67,17 @@ function connect() {
 function addPlayer(p) {
   const old = players.get(p.id);
   const o = old || { x: p.x, y: p.y };
-  Object.assign(o, { id: p.id, name: p.name, avatar: p.avatar, tx: p.x, ty: p.y, totalMinutes: p.totalMinutes });
-  o.focusEnd = p.focusLeft != null ? performance.now() + p.focusLeft : 0;
+  const now = performance.now();
+  Object.assign(o, { id: p.id, name: p.name, avatar: p.avatar, tx: p.x, ty: p.y, totalMinutes: p.totalMinutes, status: p.status, pose: p.pose });
+  // 伺服器給的是「還剩多久 / 已經過多久」,換算成本機時間軸
+  o.focus = p.focus ? { ...p.focus, endAt: now + p.focus.left, startAt: now - p.focus.elapsed } : null;
   players.set(p.id, o);
   syncPlayerObj(o);
-  if (p.id === me) localFocusEnd = o.focusEnd;
+  assignSeats();
 }
+const myFocus = () => players.get(me)?.focus || null;
+// 顯示用的時間:正計時顯示已過時間,其餘顯示剩餘時間
+const focusClock = (f, now) => (f.mode === 'up' ? fmtUp(now - f.startAt) : fmt(f.endAt - now));
 
 const on = {
   init(m) {
@@ -91,14 +96,16 @@ const on = {
     modelsReady.then(() => { rebuildRoom(); buildCatalog(); });
     refreshRoomUI();
     refreshMembers();
+    setView(view);
     sysLog(room.mine ? '歡迎回到你的房間 ✨' : `你來到了 ${room.ownerName || '朋友'} 的房間`);
     if (m.notice) toast(m.notice);
   },
-  join(m) { addPlayer(m.p); sysLog(`${m.p.name} 進來了`); refreshMembers(); },
+  join(m) { addPlayer(m.p); sysLog(`${m.p.name} 進來了`); toast(`${m.p.name} 進來了`); refreshMembers(); },
   leave(m) {
     const p = players.get(m.id);
     if (p) sysLog(`${p.name} 離開了`);
     removePlayer(m.id);
+    assignSeats();
     refreshMembers();
   },
   move(m) { const p = players.get(m.id); if (p) { p.tx = m.x; p.ty = m.y; } },
@@ -106,6 +113,7 @@ const on = {
   chat(m) {
     const p = players.get(m.id);
     if (p) showBubble(p, m.text);
+    if (currentTab !== 'chat' && m.id !== me) $('#tabs [data-tab=chat]').classList.add('dot');
     const log = $('#chatLog');
     log.append(el('div', {}, el('b', { textContent: m.name + ' ' }), m.text));
     log.scrollTop = log.scrollHeight;
@@ -120,8 +128,10 @@ const on = {
   },
   profile(m) { setProfile(m.profile); },
   focus_done(m) {
-    toast(`🎉 專注 ${m.minutes} 分鐘完成!+${m.coins} 金幣`);
-    chime();
+    if (m.stopped) { if (m.minutes) toast(`已記錄 ${m.minutes} 分鐘專注`); }
+    else if (m.phase === 'break') toast(m.next ? '休息結束,開始下一輪專注' : '休息結束');
+    else toast(m.next === 'break' ? `專注 ${m.minutes} 分鐘完成!休息 ${m.breakMin} 分鐘` : `專注 ${m.minutes} 分鐘完成!`);
+    if (!m.stopped) chime();
     refreshTimer();
   },
   toast(m) { toast(m.text); },
@@ -144,7 +154,6 @@ function sysLog(text) {
   log.scrollTop = log.scrollHeight;
 }
 const canEdit = () => room && (room.mine || room.guestsEdit);
-const owns = (type) => CATALOG[type].price === 0 || profile.owned.includes(type);
 
 // ---------- 3D 場景 ----------
 const stage = $('#stage'), canvas = $('#game'), labels = $('#labels');
@@ -160,7 +169,7 @@ renderer.toneMappingExposure = 1.12;
 
 const scene = new THREE.Scene();
 const VIEW_DIR = new THREE.Vector3(1, 0.82, 1).normalize();
-const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 100);
+const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 200);
 
 function addLights(sc, shadows) {
   sc.add(new THREE.HemisphereLight(0xffeedd, 0x8f7fc0, 0.95));
@@ -285,15 +294,20 @@ const BUILD = {
   bed(g) { put(g, 'bed_single_A', [0.6, 0.64, 0.65], 0.5, 0, 1); },
   painting(g) { put(g, 'pictureframe_large_A', 0.85, 0.5, 2.3, 0); },
   shelf(g) { put(g, 'shelf_B_large_decorated', 0.9, 1, 2.35, 0); },
-  desk(g) {
+  // o.side:椅子在書桌的哪一側(+1 靠房間這側、-1 靠牆那側);o.sx:椅子對著書桌的哪個位置
+  desk(g, o = {}) {
+    const side = o.side || 1, sx = o.sx ?? 0.95, ox = sx > 1 ? 0.4 : 1.6; // 雜物放在筆電的另一頭
     put(g, 'table_medium_long', [0.64, 0.82, 0.42], 1, 0, 0.5);
-    g.add(box(0.46, 0.025, 0.32, '#d9dce6', 0.92, 0.82, 0.56, 0.01));
-    const scr = box(0.46, 0.3, 0.02, '#4a4d68', 0.92, 0.84, 0.4, 0.008); scr.rotation.x = -0.18; g.add(scr);
-    const lit = box(0.4, 0.24, 0.006, '#bfe6f5', 0.92, 0.87, 0.413, 0.002, glow('#9fd8f0', 0.9)); lit.rotation.x = -0.18; g.add(lit);
-    g.add(cyl(0.055, 0.045, 0.11, CREAM, 1.42, 0.82, 0.3), cyl(0.045, 0.045, 0.01, '#8a5a3c', 1.42, 0.925, 0.3));
-    g.add(box(0.32, 0.05, 0.24, BOOKS[0], 0.34, 0.82, 0.5, 0.01));
-    const b2 = box(0.28, 0.05, 0.22, BOOKS[2], 0.34, 0.87, 0.5, 0.01); b2.rotation.y = 0.25; g.add(b2);
-    g.add(cyl(0.05, 0.04, 0.12, '#8c9cea', 0.3, 0.82, 0.2), cyl(0.008, 0.008, 0.16, '#ffc98a', 0.29, 0.86, 0.2), cyl(0.008, 0.008, 0.17, '#ee8a8f', 0.32, 0.86, 0.21));
+    const lap = new THREE.Group();
+    lap.add(box(0.46, 0.025, 0.32, '#d9dce6', 0, 0, 0.06, 0.01));
+    const scr = box(0.46, 0.3, 0.02, '#4a4d68', 0, 0.02, -0.1, 0.008); scr.rotation.x = -0.18; lap.add(scr);
+    const lit = box(0.4, 0.24, 0.006, '#bfe6f5', 0, 0.05, -0.087, 0.002, glow('#9fd8f0', 0.9)); lit.rotation.x = -0.18; lap.add(lit);
+    lap.position.set(sx, 0.82, 0.5); lap.rotation.y = side > 0 ? 0 : Math.PI;
+    g.add(lap);
+    g.add(cyl(0.055, 0.045, 0.11, CREAM, sx + (sx > 1 ? -0.42 : 0.42), 0.82, 0.5 - side * 0.12), cyl(0.045, 0.045, 0.01, '#8a5a3c', sx + (sx > 1 ? -0.42 : 0.42), 0.925, 0.5 - side * 0.12));
+    g.add(box(0.32, 0.05, 0.24, BOOKS[0], ox, 0.82, 0.5, 0.01));
+    const b2 = box(0.28, 0.05, 0.22, BOOKS[2], ox, 0.87, 0.5, 0.01); b2.rotation.y = 0.25; g.add(b2);
+    g.add(cyl(0.05, 0.04, 0.12, '#8c9cea', ox + (sx > 1 ? -0.22 : 0.22), 0.82, 0.5 - side * 0.2), cyl(0.008, 0.008, 0.16, '#ffc98a', ox + (sx > 1 ? -0.23 : 0.21), 0.86, 0.5 - side * 0.2), cyl(0.008, 0.008, 0.17, '#ee8a8f', ox + (sx > 1 ? -0.2 : 0.24), 0.86, 0.5 - side * 0.19));
   },
   lamp(g) {
     put(g, 'lamp_standing', 0.68, 0.5, 0, 0.5);
@@ -372,10 +386,34 @@ const BUILD = {
   },
 
 };
-function buildItem(type) {
+function buildItem(type, opt) {
   const g = new THREE.Group();
-  BUILD[type]?.(g);
+  BUILD[type]?.(g, opt);
   return g;
+}
+
+// ---------- 座位:椅子自動朝向最近的桌子,專注時角色會走過去坐下 ----------
+const SEAT_TYPES = { chair: 0.44, stool: 0.42, armchair: 0.4 }; // 座面高度
+const DESK_TYPES = ['desk', 'table'];
+let seats = []; // {id, x, z, face, h}
+const SIT_FWD = 0.3;
+function computeSeats() {
+  const desks = room.items.filter((i) => DESK_TYPES.includes(i.type)).map((i) => ({ it: i, cx: i.x + CATALOG[i.type].w / 2, cz: i.y + 0.5 }));
+  seats = room.items.filter((i) => SEAT_TYPES[i.type] != null).sort((a, b) => a.id - b.id).map((i) => {
+    const x = i.x + 0.5, z = i.y + 0.5;
+    let best = null, bd = 2.6;
+    for (const d of desks) { const k = Math.hypot(Math.min(Math.max(x, d.it.x + 0.5), d.it.x + CATALOG[d.it.type].w - 0.5) - x, d.cz - z); if (k < bd) { bd = k; best = d; } }
+    // 面向桌子(只取前後左右四個方向);附近沒有桌子就面向房間
+    let face = 0;
+    if (best) { const dx = best.cx - x, dz = best.cz - z; face = Math.abs(dz) >= 0.5 ? (dz > 0 ? 0 : Math.PI) : (dx > 0 ? Math.PI / 2 : -Math.PI / 2); }
+    return { id: i.id, x, z, face, h: SEAT_TYPES[i.type], desk: best?.it.id };
+  });
+}
+function assignSeats() {
+  if (!room) return;
+  const sitters = [...players.values()].filter((p) => p.focus && p.focus.phase === 'focus' && !p.pose).sort((a, b) => (a.id < b.id ? -1 : 1));
+  for (const p of players.values()) p.seat = null;
+  sitters.forEach((p, i) => { p.seat = seats[i] || null; });
 }
 
 // ---------- 角色:Quaternius Ultimate Animated Character Pack(CC0) ----------
@@ -410,7 +448,7 @@ function buildAvatar(a, onReady) {
       o.material.roughness = 0.8; o.material.metalness = 0;
     });
     const mixer = new THREE.AnimationMixer(m), act = {};
-    for (const n of ['Idle', 'Walk', 'SitDown']) {
+    for (const n of ['Idle', 'Walk', 'SitDown', 'Victory']) {
       const clip = c.clips.find((k) => k.name === n);
       if (clip) act[n] = mixer.clipAction(clip);
     }
@@ -425,16 +463,17 @@ function buildAvatar(a, onReady) {
   });
   return g;
 }
-function poseAvatar(g, dt, walking, focusing) {
+function poseAvatar(g, dt, walking, sitting, ownStool) {
   const u = g.userData;
   if (!u.ready) return;
-  const want = walking ? 'Walk' : focusing && u.act.SitDown ? 'SitDown' : 'Idle';
+  const want = walking ? 'Walk' : sitting && u.act.SitDown ? 'SitDown' : 'Idle';
   if (want !== u.cur && u.act[want]) {
     u.act[want].reset().fadeIn(0.2).play();
     u.act[u.cur]?.fadeOut(0.2);
     u.cur = want;
   }
-  if (u.seat) u.seat.visible = u.cur === 'SitDown';
+  if (!u.seat && MODEL.chair_stool) u.seat = put(g, 'chair_stool', 0.62, 0, 0, -0.12); // 家具模型可能比角色晚載入
+  if (u.seat) u.seat.visible = u.cur === 'SitDown' && ownStool;
   u.mixer.update(dt);
 }
 
@@ -496,10 +535,23 @@ function rebuildRoom() {
   wallMats[0].color.set(wc); wallMats[1].color.set(wt);
   floorMesh.material.map = floorTex(room.floor); floorMesh.material.needsUpdate = true;
   itemsGroup.clear(); anims = [];
+  computeSeats(); assignSeats();
   let lamps = 0, glows = 0;
   for (const it of room.items) {
     if (!CATALOG[it.type]) continue;
-    const g = buildItem(it.type);
+    let opt;
+    if (it.type === 'desk') { // 筆電擺在有椅子的那一側
+      const st = seats.find((q) => q.desk === it.id);
+      if (st) opt = { side: st.z > it.y + 0.5 ? 1 : -1, sx: Math.min(1.6, Math.max(0.4, st.x - it.x)) };
+    }
+    const g = buildItem(it.type, opt);
+    const st = seats.find((q) => q.id === it.id);
+    if (st) { // 椅子模型預設朝向 +z,轉向它面對的桌子
+      const piv = new THREE.Group();
+      piv.position.set(0.5, 0, 0.5); piv.rotation.y = st.face;
+      for (const c of [...g.children]) { c.position.x -= 0.5; c.position.z -= 0.5; piv.add(c); }
+      g.add(piv);
+    }
     itemPos(g, it.type, it.x, it.y);
     g.userData.itemId = it.id;
     if (g.userData.anim) anims.push(g.userData.anim);
@@ -624,23 +676,58 @@ if (MODES[STYLE]) {
   };
 }
 
-// ---------- 相機 ----------
+// ---------- 相機:繞著目標旋轉的透視鏡頭,可拖曳、滾輪縮放、切換視角 ----------
+// 房間只有後牆(z=0)和左牆(x=0),所以鏡頭只待在房間開口這一側
+const D2R = Math.PI / 180;
+const cam = { yaw: 45 * D2R, pitch: 30 * D2R, dist: 24, target: new THREE.Vector3(4, 1, 3) };
+const camGoal = { yaw: cam.yaw, pitch: cam.pitch, dist: cam.dist, target: cam.target.clone() };
+let view = store.get('yoyo_view') || 'desk', autoIdx = 0, autoAt = 0, activeView = 'room';
+const myPos = () => { const p = players.get(me); return p ? new THREE.Vector3(p.x, 0, p.y) : new THREE.Vector3(COLS / 2, 0, ROWS / 2); };
+const VIEWS = {
+  room: { yaw: 45, pitch: 27, dist: () => roomDist, target: () => new THREE.Vector3(COLS / 2 - 0.3, 1.2, ROWS / 2 - 0.3) },
+  desk: { yaw: 24, pitch: 13, dist: () => 8.5, target: () => myPos().add(new THREE.Vector3(0, 1.05, 0.2)) },
+  side: { yaw: 68, pitch: 18, dist: () => 11, target: () => myPos().add(new THREE.Vector3(-0.4, 0.95, 0)) },
+};
+const AUTO = ['desk', 'room', 'side'];
+let roomDist = 24;
+function applyView(name) {
+  activeView = name;
+  const v = VIEWS[name];
+  Object.assign(camGoal, { yaw: v.yaw * D2R, pitch: v.pitch * D2R, dist: v.dist() });
+}
+function setView(name) {
+  view = VIEWS[name] || name === 'auto' ? name : 'desk';
+  store.set('yoyo_view', view);
+  document.querySelectorAll('#views button').forEach((b) => b.classList.toggle('on', b.dataset.view === view));
+  autoAt = performance.now();
+  applyView(view === 'auto' ? AUTO[autoIdx % AUTO.length] : view);
+}
+$('#views').addEventListener('click', (ev) => { const b = ev.target.closest('button'); if (b) setView(b.dataset.view); });
+function updateCamera(dt, t) {
+  if (view === 'auto' && t - autoAt > 14000) { autoAt = t; applyView(AUTO[++autoIdx % AUTO.length]); }
+  camGoal.target.copy(VIEWS[activeView].target());
+  const k = 1 - Math.exp(-dt * 3.2);
+  cam.yaw += (camGoal.yaw - cam.yaw) * k; cam.pitch += (camGoal.pitch - cam.pitch) * k; cam.dist += (camGoal.dist - cam.dist) * k;
+  cam.target.lerp(camGoal.target, k);
+  const cp = Math.cos(cam.pitch);
+  camera.position.set(cam.target.x + Math.sin(cam.yaw) * cp * cam.dist, cam.target.y + Math.sin(cam.pitch) * cam.dist, cam.target.z + Math.cos(cam.yaw) * cp * cam.dist);
+  camera.lookAt(cam.target);
+  camera.updateMatrixWorld();
+}
+function orbit(dx, dy) {
+  camGoal.yaw = Math.min(86 * D2R, Math.max(4 * D2R, camGoal.yaw - dx * 0.006));
+  camGoal.pitch = Math.min(62 * D2R, Math.max(5 * D2R, camGoal.pitch + dy * 0.005));
+}
+function zoom(f) { camGoal.dist = Math.min(roomDist * 1.25, Math.max(4.5, camGoal.dist * f)); }
 function fitCamera() {
   const w = stage.clientWidth || 1, h = stage.clientHeight || 1;
   renderer.setSize(w, h, false);
   post?.resize(w, h);
-  const target = new THREE.Vector3(COLS / 2, 1.2, ROWS / 2);
-  camera.position.copy(target).addScaledVector(VIEW_DIR, 40);
-  camera.lookAt(target); camera.updateMatrixWorld();
-  let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9;
-  const v = new THREE.Vector3();
-  for (const x of [-0.3, COLS]) for (const y of [-0.45, WALLH + 0.1]) for (const z of [-0.3, ROWS]) {
-    v.set(x, y, z).applyMatrix4(camera.matrixWorldInverse);
-    x0 = Math.min(x0, v.x); x1 = Math.max(x1, v.x); y0 = Math.min(y0, v.y); y1 = Math.max(y1, v.y);
-  }
-  const asp = w / h, half = Math.max(y1 - y0, (x1 - x0) / asp) / 2 * 1.05, cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
-  Object.assign(camera, { left: cx - half * asp, right: cx + half * asp, top: cy + half, bottom: cy - half });
-  camera.updateProjectionMatrix();
+  camera.aspect = w / h; camera.updateProjectionMatrix();
+  // 全景視角:找出剛好看得到整個房間的距離
+  const tv = Math.tan((camera.fov / 2) * D2R), r = Math.hypot(COLS, ROWS, WALLH) / 2;
+  roomDist = (r / Math.min(tv, tv * camera.aspect)) * 0.86;
+  if (activeView === 'room') camGoal.dist = roomDist;
 }
 new ResizeObserver(fitCamera).observe(stage);
 
@@ -690,11 +777,13 @@ function syncPlayerObj(p) {
   if (!p.el) {
     p.el = el('div', { className: 'plabel' + (p.id === me ? ' me' : '') },
       (p.elBubble = el('div', { className: 'bubble', hidden: true })),
+      (p.elStatus = el('div', { className: 'pstatus', hidden: true })),
       (p.elTimer = el('div', { className: 'ptimer', hidden: true })),
       (p.elName = el('div', { className: 'pname' })));
     labels.append(p.el);
   }
   p.elName.textContent = p.name;
+  p.elStatus.textContent = p.status || ''; p.elStatus.hidden = !p.status;
 }
 function removePlayer(id) {
   const p = players.get(id);
@@ -715,10 +804,9 @@ function showEmote(p, e) {
   setTimeout(() => d.remove(), 1800);
 }
 
-const fmt = (ms) => {
-  const s = Math.max(0, Math.ceil(ms / 1000));
-  return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
-};
+const mmss = (s) => String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
+const fmt = (ms) => mmss(Math.max(0, Math.ceil(ms / 1000)));
+const fmtUp = (ms) => mmss(Math.max(0, Math.floor(ms / 1000)));
 function canPlace(type, x, y, ignoreId) {
   const d = CATALOG[type];
   if (!d || x < 0 || x + d.w > COLS) return false;
@@ -739,31 +827,38 @@ function frame(t) {
   const dt = Math.min(0.1, (t - lastT) / 1000); lastT = t;
   if (!room || !floorMesh) return;
   for (const a of anims) a(t);
+  updateCamera(dt, t);
   const sw = stage.clientWidth, sh = stage.clientHeight;
   for (const p of players.values()) {
     if (!p.obj) continue;
-    const dx = p.tx - p.x, dy = p.ty - p.y, d = Math.hypot(dx, dy);
+    // 專注時走向分配到的椅子;沒有空椅子就在原地坐自己的小凳子
+    const gx = p.seat ? p.seat.x : p.tx, gy = p.seat ? p.seat.z : p.ty;
+    const dx = gx - p.x, dy = gy - p.y, d = Math.hypot(dx, dy);
     const walking = d > 0.02;
     if (walking) {
       const s = Math.min(d, 3.2 * dt);
       p.x += (dx / d) * s; p.y += (dy / d) * s;
     }
-    const focusing = p.focusEnd > t;
-    const want = walking ? Math.atan2(dx, dy) : Math.PI / 4;
+    const f = p.focus && (p.focus.mode === 'up' || p.focus.endAt > t) ? p.focus : null;
+    const sitting = !!f && f.phase === 'focus' && !p.pose && !walking;
+    const want = walking ? Math.atan2(dx, dy) : sitting && p.seat ? p.seat.face : 0.35;
     let diff = want - p.obj.rotation.y;
     diff = Math.atan2(Math.sin(diff), Math.cos(diff));
     p.obj.rotation.y += diff * Math.min(1, dt * 12);
     p.heading = p.obj.rotation.y;
-    p.obj.position.set(p.x, 0, p.y);
-    poseAvatar(p.obj, dt, walking, focusing);
+    // 坐下的動作會把身體往後移,坐在椅子上時往前補回來,屁股才會落在椅面上
+    const fwd = sitting && p.seat ? SIT_FWD : 0;
+    p.sit = (p.sit || 0) + (fwd - (p.sit || 0)) * Math.min(1, dt * 8);
+    p.obj.position.set(p.x + Math.sin(p.obj.rotation.y) * p.sit, 0, p.y + Math.cos(p.obj.rotation.y) * p.sit);
+    poseAvatar(p.obj, dt, walking, sitting, !p.seat);
     // 標籤
     tmpV.set(p.x, AVATAR_H + 0.12, p.y).project(camera);
     p.el.style.transform = `translate(${((tmpV.x + 1) / 2) * sw}px, ${((1 - tmpV.y) / 2) * sh}px) translate(-50%, -100%)`;
-    if (focusing) {
-      const txt = fmt(p.focusEnd - t);
-      if (p.elTimer.textContent !== txt) p.elTimer.textContent = txt;
+    if (f) {
+      const txt = (f.phase === 'break' ? '休息 ' : '') + focusClock(f, t);
+      if (p.elTimer.textContent !== txt) { p.elTimer.textContent = txt; p.elTimer.classList.toggle('break', f.phase === 'break'); }
     }
-    if (p.elTimer.hidden === focusing) p.elTimer.hidden = !focusing;
+    if (p.elTimer.hidden === !!f) p.elTimer.hidden = !f;
   }
   if (ghost) {
     const d = CATALOG[holding.type];
@@ -800,10 +895,37 @@ function tileAt(pt) { // 拿著家具時,讓家具以游標為中心
   if (pt.wall) return null;
   return { x: Math.floor(pt.x - (d.w - 1) / 2), y: Math.floor(pt.z - (d.h - 1) / 2) };
 }
-canvas.addEventListener('pointermove', (ev) => { hover = tileAt(pick(ev)); });
+// 拖曳 = 轉動鏡頭;沒有移動的點擊 = 走路 / 放家具;滾輪或雙指 = 縮放
+const ptrs = new Map();
+let dragMoved = false, pinch = 0;
+canvas.addEventListener('pointermove', (ev) => {
+  const q = ptrs.get(ev.pointerId);
+  if (!q) { hover = tileAt(pick(ev)); return; }
+  const dx = ev.clientX - q.x, dy = ev.clientY - q.y;
+  q.x = ev.clientX; q.y = ev.clientY;
+  if (ptrs.size === 2) {
+    const [a, b] = [...ptrs.values()], dist = Math.hypot(a.x - b.x, a.y - b.y);
+    if (pinch) zoom(pinch / dist);
+    pinch = dist; dragMoved = true;
+    return;
+  }
+  if (!dragMoved && Math.hypot(ev.clientX - q.x0, ev.clientY - q.y0) < 6) return;
+  dragMoved = true; canvas.classList.add('drag');
+  if (holding) hover = tileAt(pick(ev)); else orbit(dx, dy);
+});
 canvas.addEventListener('pointerleave', () => { hover = null; });
+canvas.addEventListener('wheel', (ev) => { ev.preventDefault(); zoom(Math.exp(ev.deltaY * 0.0012)); }, { passive: false });
 canvas.addEventListener('pointerdown', (ev) => {
-  if (!room) return;
+  if (!ptrs.size) dragMoved = false;
+  ptrs.set(ev.pointerId, { x: ev.clientX, y: ev.clientY, x0: ev.clientX, y0: ev.clientY });
+  canvas.setPointerCapture(ev.pointerId);
+});
+const endPtr = (ev) => { ptrs.delete(ev.pointerId); pinch = 0; canvas.classList.remove('drag'); };
+canvas.addEventListener('pointercancel', endPtr);
+canvas.addEventListener('pointerup', (ev) => {
+  const wasDrag = dragMoved;
+  endPtr(ev);
+  if (wasDrag || !room) return;
   const pt = pick(ev);
   if (holding) {
     const tl = (hover = tileAt(pt));
@@ -812,7 +934,7 @@ canvas.addEventListener('pointerdown', (ev) => {
     else send({ t: 'place', type: holding.type, x: tl.x, y: tl.y });
     return;
   }
-  if (editing()) { // 佈置分頁開著:點家具可拿起
+  if (editing()) { // 佈置面板開著:點家具可拿起
     let o = ray.intersectObjects(itemsGroup.children, true)[0]?.object;
     while (o && o.userData.itemId == null) o = o.parent;
     const it = o && room.items.find((i) => i.id === o.userData.itemId);
@@ -826,36 +948,59 @@ canvas.addEventListener('pointerdown', (ev) => {
 });
 window.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') setHolding(null); });
 
-// ---------- 分頁 ----------
-let currentTab = 'focus';
+// ---------- 面板(底部工具列開關右側抽屜) ----------
+let currentTab = null;
+const TAB_TITLES = { decor: '佈置房間', avatar: '角色', chat: '聊天', people: '房間成員', settings: '設定' };
 const editing = () => currentTab === 'decor' && canEdit();
+function openTab(name) {
+  currentTab = name;
+  $('#drawer').hidden = !name;
+  $('#drawerTitle').textContent = TAB_TITLES[name] || '';
+  document.querySelectorAll('#tabs button').forEach((x) => x.classList.toggle('on', x.dataset.tab === name));
+  document.querySelectorAll('.tab').forEach((x) => x.classList.toggle('on', x.id === 'tab-' + name));
+  if (name !== 'decor') setHolding(null);
+  if (name === 'avatar') renderAvatarPreview();
+  if (name === 'chat') { $('#tabs [data-tab=chat]').classList.remove('dot'); $('#chatLog').scrollTop = 1e9; }
+}
 $('#tabs').addEventListener('click', (ev) => {
   const b = ev.target.closest('button');
-  if (!b) return;
-  currentTab = b.dataset.tab;
-  document.querySelectorAll('#tabs button').forEach((x) => x.classList.toggle('on', x === b));
-  document.querySelectorAll('.tab').forEach((x) => x.classList.toggle('on', x.id === 'tab-' + currentTab));
-  if (currentTab !== 'decor') setHolding(null);
-  if (currentTab === 'avatar') renderAvatarPreview();
+  if (b) openTab(currentTab === b.dataset.tab ? null : b.dataset.tab);
 });
+$('#drawerClose').addEventListener('click', () => openTab(null));
 
-// ---------- 專注 ----------
+// ---------- 專注計時 ----------
+const num = (id, lo, hi, def) => { const v = Math.floor(+$(id).value); return v >= lo && v <= hi ? v : def; };
+const idleMs = () => (timerMode === 'up' ? 0 : (timerMode === 'pomo' ? num('#pomoFocus', 1, 180, 25) : selectedMin) * 60000);
 function tickTimer(t) {
-  const focusing = localFocusEnd > t;
-  const text = focusing ? fmt(localFocusEnd - t) : fmt(selectedMin * 60000);
+  let f = myFocus();
+  if (f && f.mode !== 'up' && f.endAt <= t - 1500) f = null; // 等伺服器送下一階段
+  const text = f ? focusClock(f, t) : fmt(idleMs());
   if ($('#timerText').textContent !== text) {
     $('#timerText').textContent = text;
-    document.title = focusing ? `${text} 專注中 — 悠悠自習室` : '悠悠自習室';
-    if (focusing) refreshMembers();
+    document.title = f ? `${text} ${f.phase === 'break' ? '休息中' : '專注中'} — 悠悠自習室` : '悠悠自習室';
+    if (f && currentTab === 'people') refreshMembers();
   }
 }
 function refreshTimer() {
-  const focusing = localFocusEnd > performance.now();
-  $('#timerLabel').textContent = focusing ? '專注中…加油!' : '準備好就開始吧';
-  $('#focusBtn').textContent = focusing ? '放棄這次專注' : '開始專注';
-  $('#focusBtn').className = focusing ? 'danger' : 'primary';
-  $('#presets').hidden = focusing;
+  const f = myFocus();
+  document.body.classList.toggle('focusing', !!f);
+  const lab = $('#timerLabel');
+  lab.classList.toggle('break', f?.phase === 'break');
+  lab.textContent = !f ? '準備好就開始吧'
+    : f.phase === 'break' ? `休息一下 · 第 ${f.round} 輪結束`
+    : f.mode === 'pomo' ? `專注中 · 第 ${f.round} 輪` : '專注中';
+  $('#focusBtn').textContent = f ? '結束' : '開始專注';
+  $('#focusBtn').className = f ? 'danger' : 'primary';
+  if (f) setMode(f.mode, true);
 }
+function setMode(m, silent) {
+  timerMode = m;
+  document.querySelectorAll('#modes button').forEach((x) => x.classList.toggle('on', x.dataset.mode === m));
+  document.querySelectorAll('#timerSetup .setup').forEach((x) => { x.hidden = x.dataset.for !== m; });
+  if (!silent) store.set('yoyo_mode', m);
+}
+$('#modes').addEventListener('click', (ev) => { const b = ev.target.closest('button'); if (b && !myFocus()) setMode(b.dataset.mode); });
+setMode(['pomo', 'down', 'up'].includes(store.get('yoyo_mode')) ? store.get('yoyo_mode') : 'pomo', true);
 $('#presets').addEventListener('click', (ev) => {
   const b = ev.target.closest('button');
   if (!b) return;
@@ -871,18 +1016,54 @@ $('#customMin').addEventListener('input', (ev) => {
   }
 });
 $('#focusBtn').addEventListener('click', () => {
-  if (localFocusEnd > performance.now()) {
-    if (confirm('確定要放棄嗎?這次專注不會獲得金幣。')) send({ t: 'focus_stop' });
-  } else send({ t: 'focus_start', minutes: selectedMin });
+  if (myFocus()) return send({ t: 'focus_stop' });
+  send({ t: 'focus_start', mode: timerMode, minutes: timerMode === 'pomo' ? num('#pomoFocus', 1, 180, 25) : selectedMin, breakMin: num('#pomoBreak', 1, 60, 5) });
+});
+// 狀態文字與專注姿勢
+let statusTimer = 0;
+$('#statusInput').addEventListener('input', (ev) => {
+  clearTimeout(statusTimer);
+  statusTimer = setTimeout(() => send({ t: 'status', text: ev.target.value }), 400);
+});
+$('#poses').addEventListener('click', (ev) => { const b = ev.target.closest('button'); if (b) { setPose(+b.dataset.pose); send({ t: 'status', pose: +b.dataset.pose }); } });
+function setPose(i) { document.querySelectorAll('#poses button').forEach((x) => x.classList.toggle('on', +x.dataset.pose === i)); }
+
+// ---------- 待辦清單(存在伺服器的個人存檔裡) ----------
+let todos = [];
+function renderTodos() {
+  $('#todoList').replaceChildren(...todos.map((td, i) => {
+    const cb = el('input', { type: 'checkbox', checked: td.done, ariaLabel: '完成' });
+    cb.onchange = () => { td.done = cb.checked; saveTodos(); };
+    const del = el('button', { type: 'button', textContent: '✕', ariaLabel: '刪除' });
+    del.onclick = () => { todos.splice(i, 1); saveTodos(); };
+    return el('li', { className: td.done ? 'done' : '' }, cb, el('span', { textContent: td.text }), del);
+  }));
+  const left = todos.filter((x) => !x.done).length;
+  $('#todoCount').textContent = todos.length ? `${left} 件未完成` : '';
+}
+function saveTodos() { renderTodos(); send({ t: 'todos', list: todos }); }
+$('#todoForm').addEventListener('submit', (ev) => {
+  ev.preventDefault();
+  const v = $('#todoInput').value.trim();
+  if (!v) return;
+  if (todos.length >= 30) return toast('待辦最多 30 件');
+  todos.push({ text: v.slice(0, 60), done: false });
+  $('#todoInput').value = '';
+  saveTodos();
+});
+$('#todoToggle').addEventListener('click', (ev) => {
+  const open = $('#todoBody').hidden;
+  $('#todoBody').hidden = !open;
+  ev.currentTarget.setAttribute('aria-expanded', open);
 });
 
 function refreshMembers() {
   const ul = $('#members'), now = performance.now();
   ul.replaceChildren(...[...players.values()].map((p) => {
-    const focusing = p.focusEnd > now;
+    const f = p.focus;
     return el('li', {},
-      el('span', { textContent: p.name + (p.id === me ? '(你)' : '') }),
-      el('span', { className: 'st' + (focusing ? ' focus' : ''), textContent: focusing ? '專注中 ' + fmt(p.focusEnd - now) : `累計 ${p.totalMinutes} 分` }));
+      el('span', { textContent: p.name + (p.id === me ? '(你)' : '') + (p.status ? ` · ${p.status}` : '') }),
+      el('span', { className: 'st' + (f ? ' focus' : ''), textContent: f ? (f.phase === 'break' ? '休息中 ' : '專注中 ') + focusClock(f, now) : `累計 ${p.totalMinutes} 分` }));
   }));
   $('#online').textContent = players.size;
 }
@@ -916,28 +1097,14 @@ function buildCatalog() {
   $('#catalog').replaceChildren(...Object.entries(CATALOG).map(([type, d]) => {
     const cv = el('canvas', { width: 160, height: 160 });
     snapshot(buildItem(type), cv, d.kind === 'wall' ? FRONT_DIR : VIEW_DIR);
-    const card = el('div', { className: 'item' }, cv, el('span', { textContent: d.name }), el('span', { className: 'price' }));
+    const card = el('div', { className: 'item' }, cv, el('span', { textContent: d.name }));
     card.dataset.type = type;
     card.addEventListener('click', () => {
       if (!canEdit()) return;
-      if (!owns(type)) {
-        if (profile.coins < d.price) return toast(`還差 ${d.price - profile.coins} 枚金幣,再專注一下吧!`);
-        if (confirm(`用 ${d.price} 金幣解鎖「${d.name}」?`)) send({ t: 'buy', type });
-        return;
-      }
       setHolding(holding && !holding.fromId && holding.type === type ? null : { type });
     });
     return card;
   }));
-  refreshCatalog();
-}
-function refreshCatalog() {
-  if (!profile) return;
-  document.querySelectorAll('.item').forEach((card) => {
-    const d = CATALOG[card.dataset.type], own = owns(card.dataset.type);
-    card.classList.toggle('locked', !own);
-    card.querySelector('.price').textContent = own ? (d.price ? '已解鎖' : '免費') : `${d.price} 金幣`;
-  });
 }
 function swatches(box, palettes, key) {
   box.replaceChildren(...palettes.map((p, i) => {
@@ -964,7 +1131,6 @@ $('#guestsEdit').addEventListener('change', (ev) => send({ t: 'room_settings', g
 let draft = null, profileTimer = 0;
 function setProfile(p, first) {
   profile = p;
-  $('#coins').textContent = p.coins;
   $('#statMin').textContent = p.totalMinutes;
   $('#statSes').textContent = p.sessions;
   if (first || !draft) {
@@ -972,7 +1138,11 @@ function setProfile(p, first) {
     $('#nameInput').value = p.name;
     buildAvatarOptions();
   }
-  if (Object.keys(CATALOG).length) refreshCatalog();
+  if (first) {
+    todos = (p.todos || []).map((x) => ({ ...x })); renderTodos();
+    $('#statusInput').value = p.status || '';
+    setPose(p.pose || 0);
+  }
   refreshTimer();
 }
 function pushProfile() {

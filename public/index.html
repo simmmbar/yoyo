@@ -10,112 +10,144 @@
 </script>
 </head>
 <body>
-<header>
+<section class="stage" id="stage">
+  <canvas id="game"></canvas>
+  <div id="labels"></div>
+  <div id="overlay"><div id="overlayText">載入中…第一次開啟需要下載模型,請稍候</div></div>
+</section>
+
+<header class="hud">
   <h1><span class="moon">☾</span> 悠悠自習室</h1>
-  <div class="chips">
-    <span class="chip" id="roomChip">房號 <b id="roomCode">------</b></span>
-    <button class="chip btn" id="copyLink">複製邀請連結</button>
-    <button class="chip btn" id="goHome" hidden>回我的房間</button>
-    <span class="chip">在線 <b id="online">0</b></span>
-    <span class="chip coin"><i class="dot"></i><b id="coins">0</b></span>
+  <span class="chip" id="roomChip">房號 <b id="roomCode">------</b></span>
+  <button class="chip btn" id="copyLink">邀請朋友</button>
+  <button class="chip btn" id="goHome" hidden>回我的房間</button>
+  <span class="chip">在線 <b id="online">0</b></span>
+  <div class="views" id="views" role="group" aria-label="視角">
+    <button data-view="desk" class="on">桌前</button>
+    <button data-view="room">全景</button>
+    <button data-view="side">側面</button>
+    <button data-view="auto">自動運鏡</button>
   </div>
 </header>
 
-<main>
-  <section class="stage" id="stage">
-    <canvas id="game"></canvas>
-    <div id="labels"></div>
-    <div id="editBar" hidden>
-      <span id="editHint"></span>
-      <button id="editRemove" hidden>收回這件</button>
-      <button id="editCancel">取消</button>
+<div class="widgets">
+  <section class="card" id="timerCard">
+    <div class="seg" id="modes">
+      <button data-mode="pomo" class="on">番茄鐘</button>
+      <button data-mode="down">倒數</button>
+      <button data-mode="up">正計時</button>
     </div>
-    <div id="overlay"><div id="overlayText">載入中…第一次開啟需要下載模型,請稍候</div></div>
+    <div id="timerLabel">準備好就開始吧</div>
+    <div id="timerText">25:00</div>
+    <div id="timerSetup">
+      <div class="setup" data-for="pomo">
+        <label>專注 <input id="pomoFocus" type="number" min="1" max="180" value="25"> 分</label>
+        <label>休息 <input id="pomoBreak" type="number" min="1" max="60" value="5"> 分</label>
+      </div>
+      <div class="setup" data-for="down" id="presets" hidden>
+        <button data-min="15">15</button>
+        <button data-min="25" class="on">25</button>
+        <button data-min="45">45</button>
+        <button data-min="60">60</button>
+        <input id="customMin" type="number" min="1" max="180" placeholder="自訂" aria-label="自訂分鐘">
+      </div>
+      <div class="setup" data-for="up" hidden><span class="hint">從 00:00 開始往上計時,想停就停。</span></div>
+    </div>
+    <input id="statusInput" maxlength="24" placeholder="正在做什麼?(會顯示在頭上)" autocomplete="off">
+    <div class="seg small" id="poses">
+      <button data-pose="0" class="on">坐著專注</button>
+      <button data-pose="1">站著專注</button>
+    </div>
+    <button id="focusBtn" class="primary">開始專注</button>
+    <div class="mini"><span>累計 <b id="statMin">0</b> 分鐘</span><span>完成 <b id="statSes">0</b> 次</span></div>
   </section>
 
-  <aside>
-    <nav id="tabs">
-      <button data-tab="focus" class="on">專注</button>
-      <button data-tab="chat">聊天</button>
-      <button data-tab="decor">佈置</button>
-      <button data-tab="avatar">角色</button>
-      <button data-tab="settings">設定</button>
-    </nav>
-
-    <div class="tab on" id="tab-focus">
-      <div id="timerBox">
-        <div id="timerLabel">準備好就開始吧</div>
-        <div id="timerText">25:00</div>
-        <div id="presets">
-          <button data-min="15">15</button>
-          <button data-min="25" class="on">25</button>
-          <button data-min="45">45</button>
-          <button data-min="60">60</button>
-          <input id="customMin" type="number" min="1" max="180" placeholder="自訂" aria-label="自訂分鐘">
-        </div>
-        <button id="focusBtn" class="primary">開始專注</button>
-        <p class="hint">每專注 1 分鐘可獲得 1 枚金幣,中途放棄不會有獎勵。</p>
-      </div>
-      <div class="stats">
-        <div><b id="statMin">0</b><span>累計分鐘</span></div>
-        <div><b id="statSes">0</b><span>完成次數</span></div>
-      </div>
-      <h3>房間成員</h3>
-      <ul id="members"></ul>
+  <section class="card" id="todoCard">
+    <button class="cardHead" id="todoToggle" aria-expanded="true"><span>待辦清單</span><b id="todoCount"></b></button>
+    <div id="todoBody">
+      <ul id="todoList"></ul>
+      <form id="todoForm"><input id="todoInput" maxlength="60" placeholder="新增一件事…" autocomplete="off"><button aria-label="新增">+</button></form>
     </div>
+  </section>
 
-    <div class="tab" id="tab-chat">
-      <div id="chatLog"></div>
-      <div id="emotes"></div>
-      <form id="chatForm">
-        <input id="chatInput" maxlength="200" placeholder="說點什麼…" autocomplete="off">
-        <button class="primary">送出</button>
-      </form>
-    </div>
+  <section class="card" id="musicCard">
+    <div class="cardHead static"><span>環境音</span></div>
+    <div id="sounds"></div>
+  </section>
+</div>
 
-    <div class="tab" id="tab-decor">
-      <p class="hint" id="decorHint"></p>
-      <div id="decorBody">
-        <h3>家具</h3>
-        <div id="catalog"></div>
-        <h3>牆面</h3>
-        <div class="swatches" id="wallSwatches"></div>
-        <h3>地板</h3>
-        <div class="swatches" id="floorSwatches"></div>
-        <label id="guestsEditRow" class="check" hidden>
-          <input type="checkbox" id="guestsEdit"> 讓來訪的朋友一起佈置
-        </label>
-      </div>
-    </div>
+<div id="editBar" hidden>
+  <span id="editHint"></span>
+  <button id="editRemove" hidden>收回這件</button>
+  <button id="editCancel">取消</button>
+</div>
 
-    <div class="tab" id="tab-avatar">
-      <canvas id="avatarPreview" width="320" height="320"></canvas>
-      <label class="field">暱稱 <input id="nameInput" maxlength="16"></label>
-      <div id="avatarOptions"></div>
-    </div>
+<nav id="dock">
+  <div id="emotes"></div>
+  <div id="tabs">
+    <button data-tab="decor">佈置</button>
+    <button data-tab="avatar">角色</button>
+    <button data-tab="chat">聊天</button>
+    <button data-tab="people">成員</button>
+    <button data-tab="settings">設定</button>
+  </div>
+</nav>
 
-    <div class="tab" id="tab-settings">
-      <h3>環境音</h3>
-      <div id="sounds"></div>
-      <h3>雲端存檔</h3>
-      <p class="hint">進度會自動存在伺服器。在別的裝置輸入你的存檔碼,就能接著玩。存檔碼等同密碼,請不要給別人。</p>
-      <div class="row">
-        <input id="saveCode" readonly type="password" aria-label="我的存檔碼">
-        <button id="showCode">顯示</button>
-        <button id="copyCode">複製</button>
-      </div>
-      <div class="row">
-        <input id="restoreInput" placeholder="貼上存檔碼" autocomplete="off">
-        <button id="restoreBtn">載入存檔</button>
-      </div>
-      <h3>拜訪朋友</h3>
-      <div class="row">
-        <input id="joinInput" placeholder="輸入房號" maxlength="6" autocomplete="off">
-        <button id="joinBtn">前往</button>
-      </div>
+<aside id="drawer" hidden>
+  <div class="drawerHead"><b id="drawerTitle"></b><button id="drawerClose" aria-label="關閉">✕</button></div>
+
+  <div class="tab" id="tab-people">
+    <ul id="members"></ul>
+  </div>
+
+  <div class="tab" id="tab-chat">
+    <div id="chatLog"></div>
+    <form id="chatForm">
+      <input id="chatInput" maxlength="200" placeholder="說點什麼…" autocomplete="off">
+      <button class="primary">送出</button>
+    </form>
+  </div>
+
+  <div class="tab" id="tab-decor">
+    <p class="hint" id="decorHint"></p>
+    <div id="decorBody">
+      <h3>家具</h3>
+      <div id="catalog"></div>
+      <h3>牆面</h3>
+      <div class="swatches" id="wallSwatches"></div>
+      <h3>地板</h3>
+      <div class="swatches" id="floorSwatches"></div>
+      <label id="guestsEditRow" class="check" hidden>
+        <input type="checkbox" id="guestsEdit"> 讓來訪的朋友一起佈置
+      </label>
     </div>
-  </aside>
-</main>
+  </div>
+
+  <div class="tab" id="tab-avatar">
+    <canvas id="avatarPreview" width="320" height="320"></canvas>
+    <label class="field">暱稱 <input id="nameInput" maxlength="16"></label>
+    <div id="avatarOptions"></div>
+  </div>
+
+  <div class="tab" id="tab-settings">
+    <h3>雲端存檔</h3>
+    <p class="hint">進度會自動存在伺服器。在別的裝置輸入你的存檔碼,就能接著玩。存檔碼等同密碼,請不要給別人。</p>
+    <div class="row">
+      <input id="saveCode" readonly type="password" aria-label="我的存檔碼">
+      <button id="showCode">顯示</button>
+      <button id="copyCode">複製</button>
+    </div>
+    <div class="row">
+      <input id="restoreInput" placeholder="貼上存檔碼" autocomplete="off">
+      <button id="restoreBtn">載入存檔</button>
+    </div>
+    <h3>拜訪朋友</h3>
+    <div class="row">
+      <input id="joinInput" placeholder="輸入房號" maxlength="6" autocomplete="off">
+      <button id="joinBtn">前往</button>
+    </div>
+  </div>
+</aside>
 <div id="toasts"></div>
 <script>
 // 載入失敗時把原因顯示出來,不要只留一片空白

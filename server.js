@@ -12,28 +12,30 @@ const COLS = 8, ROWS = 6, MAX_ITEMS = 60, MAX_ROOM_PLAYERS = 12;
 
 // kind: floor(佔地板格) / rug(鋪在地上,可被踩與疊放) / wall(掛在牆上)
 const CATALOG = {
-  desk:      { name: '書桌',     price: 0,   w: 2, h: 1, kind: 'floor' },
-  chair:     { name: '椅子',     price: 0,   w: 1, h: 1, kind: 'floor' },
-  plant:     { name: '盆栽',     price: 0,   w: 1, h: 1, kind: 'floor' },
-  rug:       { name: '條紋地毯', price: 20,  w: 3, h: 2, kind: 'rug' },
-  clock:     { name: '時鐘',     price: 25,  w: 1, h: 1, kind: 'wall' },
-  lamp:      { name: '立燈',     price: 30,  w: 1, h: 1, kind: 'floor' },
-  rug2:      { name: '圓地毯',   price: 30,  w: 3, h: 2, kind: 'rug' },
-  stool:     { name: '小凳子',   price: 30,  w: 1, h: 1, kind: 'floor' },
-  window:    { name: '窗戶',     price: 40,  w: 2, h: 1, kind: 'wall' },
-  table:     { name: '小桌',     price: 45,  w: 1, h: 1, kind: 'floor' },
-  shelf:     { name: '壁掛書架', price: 45,  w: 2, h: 1, kind: 'wall' },
-  painting:  { name: '掛畫',     price: 50,  w: 1, h: 1, kind: 'wall' },
-  cabinet:   { name: '床頭櫃',   price: 55,  w: 1, h: 1, kind: 'floor' },
-  bookshelf: { name: '置物櫃',   price: 60,  w: 2, h: 1, kind: 'floor' },
-  tree:      { name: '仙人掌',   price: 70,  w: 1, h: 1, kind: 'floor' },
-  armchair:  { name: '單人沙發', price: 70,  w: 1, h: 1, kind: 'floor' },
-  sofa:      { name: '沙發',     price: 80,  w: 2, h: 1, kind: 'floor' },
-  bed:       { name: '床',       price: 100, w: 1, h: 2, kind: 'floor' },
-  tv:        { name: '電視',     price: 120, w: 1, h: 1, kind: 'floor' },
-  cat:       { name: '貓咪',     price: 200, w: 1, h: 1, kind: 'floor' },
+  desk:      { name: '書桌',     w: 2, h: 1, kind: 'floor' },
+  chair:     { name: '椅子',     w: 1, h: 1, kind: 'floor' },
+  plant:     { name: '盆栽',     w: 1, h: 1, kind: 'floor' },
+  rug:       { name: '條紋地毯', w: 3, h: 2, kind: 'rug' },
+  clock:     { name: '時鐘',     w: 1, h: 1, kind: 'wall' },
+  lamp:      { name: '立燈',     w: 1, h: 1, kind: 'floor' },
+  rug2:      { name: '圓地毯',   w: 3, h: 2, kind: 'rug' },
+  stool:     { name: '小凳子',   w: 1, h: 1, kind: 'floor' },
+  window:    { name: '窗戶',     w: 2, h: 1, kind: 'wall' },
+  table:     { name: '小桌',     w: 1, h: 1, kind: 'floor' },
+  shelf:     { name: '壁掛書架', w: 2, h: 1, kind: 'wall' },
+  painting:  { name: '掛畫',     w: 1, h: 1, kind: 'wall' },
+  cabinet:   { name: '床頭櫃',   w: 1, h: 1, kind: 'floor' },
+  bookshelf: { name: '置物櫃',   w: 2, h: 1, kind: 'floor' },
+  tree:      { name: '仙人掌',   w: 1, h: 1, kind: 'floor' },
+  armchair:  { name: '單人沙發', w: 1, h: 1, kind: 'floor' },
+  sofa:      { name: '沙發',     w: 2, h: 1, kind: 'floor' },
+  bed:       { name: '床',       w: 1, h: 2, kind: 'floor' },
+  tv:        { name: '電視',     w: 1, h: 1, kind: 'floor' },
+  cat:       { name: '貓咪',     w: 1, h: 1, kind: 'floor' },
 };
 const AVATAR_RANGES = { skin: 5, hair: 6, hairColor: 7, shirt: 8, acc: 5 };
+const POSES = 2; // 專注姿勢:0 坐著、1 站著
+const MAX_FOCUS_MIN = 180, MAX_TODOS = 30;
 const THEME_COUNT = 6;
 const EMOTES = ['👋', '❤️', '😂', '👍', '🔥', '☕', '💤', '✨'];
 
@@ -46,7 +48,8 @@ const profiles = loadJson('profiles.json'); // key(sha256 of token) -> profile
 const rooms = loadJson('rooms.json');       // code -> room
 // 舊存檔相容:魚缸已改為電視
 for (const r of Object.values(rooms)) for (const it of r.items || []) if (it.type === 'aquarium') it.type = 'tv';
-for (const p of Object.values(profiles)) p.owned = (p.owned || []).map((t) => (t === 'aquarium' ? 'tv' : t));
+// 舊存檔相容:舊版的專注紀錄沒有模式欄位,直接清掉
+for (const p of Object.values(profiles)) if (p.focus && !p.focus.mode) p.focus = null;
 let dirty = false;
 const markDirty = () => { dirty = true; };
 function flush() {
@@ -92,17 +95,18 @@ function newRoom(ownerKey) {
   rooms[code] = {
     code, ownerKey, wall: 0, floor: 0, guestsEdit: false, nextId: 12,
     // 新房間附一組基本佈置(之後可自由移動或收回)
+    // 椅子在書桌後面、面向房間,窗戶在背後
     items: [
-      { id: 1, type: 'desk', x: 1, y: 0 },
-      { id: 2, type: 'chair', x: 2, y: 1 },
+      { id: 1, type: 'desk', x: 3, y: 2 },
+      { id: 2, type: 'chair', x: 4, y: 1 },
       { id: 3, type: 'plant', x: 0, y: 0 },
-      { id: 4, type: 'lamp', x: 4, y: 0 },
-      { id: 5, type: 'bookshelf', x: 5, y: 0 },
-      { id: 6, type: 'plant', x: 7, y: 0 },
+      { id: 4, type: 'lamp', x: 2, y: 1 },
+      { id: 5, type: 'bookshelf', x: 6, y: 0 },
+      { id: 6, type: 'plant', x: 7, y: 5 },
       { id: 7, type: 'rug', x: 3, y: 3 },
-      { id: 8, type: 'window', x: 1, y: 0 },
-      { id: 9, type: 'painting', x: 3, y: 0 },
-      { id: 11, type: 'shelf', x: 5, y: 0 },
+      { id: 8, type: 'window', x: 3, y: 0 },
+      { id: 9, type: 'painting', x: 1, y: 0 },
+      { id: 11, type: 'shelf', x: 6, y: 0 },
       { id: 10, type: 'plant', x: 0, y: 5 },
     ],
   };
@@ -117,7 +121,7 @@ function getProfile(key) {
       pid: randCode(8),
       name: '旅人' + Math.floor(1000 + Math.random() * 9000),
       avatar: { skin: 0, hair: Math.floor(Math.random() * 5), hairColor: Math.floor(Math.random() * 7), shirt: Math.floor(Math.random() * 8), acc: 0 },
-      coins: 30, totalMinutes: 0, sessions: 0, owned: [], focus: null, room: null,
+      totalMinutes: 0, sessions: 0, focus: null, room: null, status: '', pose: 0, todos: [],
     };
     markDirty();
   }
@@ -125,17 +129,31 @@ function getProfile(key) {
   return p;
 }
 
-// 專注時間到 → 發獎勵(1 分鐘 = 1 金幣)
-function settleFocus(p) {
-  const f = p.focus;
-  if (!f || Date.now() < f.end) return null;
-  p.focus = null;
-  p.coins += f.minutes;
-  p.totalMinutes += f.minutes;
-  p.sessions += 1;
+// 專注計時(都在伺服器端):
+//   pomo 番茄鐘:專注 → 休息 → 專注…自動循環;down 倒數;up 正計時(最多 180 分鐘)
+// focus = { mode, phase: 'focus'|'break', start, end, minutes, breakMin, round }
+function credit(p, minutes, done) {
+  p.totalMinutes += minutes;
+  if (done) p.sessions += 1;
   markDirty();
-  return { minutes: f.minutes, coins: f.minutes };
 }
+// 一個階段時間到 → 結算並決定下一階段。online=false(斷線期間到期)時不自動接續
+function settleFocus(p, online) {
+  const f = p.focus, now = Date.now();
+  if (!f || now < f.end) return null;
+  if (f.phase === 'break') {
+    p.focus = online ? { ...f, phase: 'focus', start: now, end: now + f.minutes * 60000, round: f.round + 1 } : null;
+    markDirty();
+    return { phase: 'break', minutes: 0, next: p.focus ? 'focus' : null };
+  }
+  credit(p, f.minutes, true);
+  p.focus = online && f.mode === 'pomo' ? { ...f, phase: 'break', start: now, end: now + f.breakMin * 60000 } : null;
+  return { phase: 'focus', minutes: f.minutes, next: p.focus ? 'break' : null, breakMin: f.breakMin };
+}
+const focusView = (f) => f && {
+  mode: f.mode, phase: f.phase, round: f.round,
+  left: Math.max(0, f.end - Date.now()), elapsed: Date.now() - f.start,
+};
 
 // ---------- 連線狀態 ----------
 const live = new Map(); // room code -> Set<client>
@@ -151,12 +169,11 @@ const broadcast = (code, msg, except) => {
 const pub = (c) => ({
   id: c.profile.pid, name: c.profile.name, avatar: c.profile.avatar,
   x: c.x, y: c.y, totalMinutes: c.profile.totalMinutes,
-  focusLeft: c.profile.focus ? Math.max(0, c.profile.focus.end - Date.now()) : null,
-  focusMinutes: c.profile.focus ? c.profile.focus.minutes : null,
+  focus: focusView(c.profile.focus), status: c.profile.status || '', pose: c.profile.pose || 0,
 });
 const selfProfile = (p) => ({
-  name: p.name, avatar: p.avatar, coins: p.coins, totalMinutes: p.totalMinutes,
-  sessions: p.sessions, owned: p.owned, room: p.room,
+  name: p.name, avatar: p.avatar, totalMinutes: p.totalMinutes, sessions: p.sessions,
+  room: p.room, status: p.status || '', pose: p.pose || 0, todos: p.todos || [],
 });
 const roomView = (r) => ({ code: r.code, items: r.items, wall: r.wall, floor: r.floor, guestsEdit: r.guestsEdit });
 
@@ -189,7 +206,7 @@ const handlers = {
     c.room = room.code;
     c.x = 2.5 + Math.random() * 3;
     c.y = 2.5 + Math.random() * 2.5;
-    const reward = settleFocus(p);
+    const reward = settleFocus(p, false);
 
     if (!live.has(room.code)) live.set(room.code, new Set());
     const set = live.get(room.code);
@@ -236,36 +253,57 @@ const handlers = {
   },
 
   focus_start(c, m) {
-    const minutes = Math.floor(Number(m.minutes));
-    if (!(minutes >= 1 && minutes <= 180) || c.profile.focus) return;
-    c.profile.focus = { end: Date.now() + minutes * 60000, minutes };
+    const p = c.profile;
+    if (p.focus || !['pomo', 'down', 'up'].includes(m.mode)) return;
+    const minutes = m.mode === 'up' ? MAX_FOCUS_MIN : Math.floor(Number(m.minutes));
+    const breakMin = m.mode === 'pomo' ? Math.floor(Number(m.breakMin)) : 0;
+    if (!(minutes >= 1 && minutes <= MAX_FOCUS_MIN)) return;
+    if (m.mode === 'pomo' && !(breakMin >= 1 && breakMin <= 60)) return;
+    const now = Date.now();
+    p.focus = { mode: m.mode, phase: 'focus', start: now, end: now + minutes * 60000, minutes, breakMin, round: 1 };
     markDirty();
     broadcast(c.room, { t: 'pupdate', p: pub(c) });
   },
 
+  // 手動結束:已經專注的整數分鐘照樣計入統計
   focus_stop(c) {
-    if (!c.profile.focus) return;
-    c.profile.focus = null;
+    const p = c.profile, f = p.focus;
+    if (!f) return;
+    p.focus = null;
+    let minutes = 0;
+    if (f.phase === 'focus') {
+      minutes = clamp(Math.floor((Date.now() - f.start) / 60000), 0, f.minutes);
+      credit(p, minutes, f.mode === 'up' && minutes >= 1);
+    }
+    markDirty();
+    send(c, { t: 'focus_done', phase: f.phase, minutes, stopped: true, next: null });
+    send(c, { t: 'profile', profile: selfProfile(p) });
+    broadcast(c.room, { t: 'pupdate', p: pub(c) });
+  },
+
+  // 頭上的「正在做什麼」與專注姿勢
+  status(c, m) {
+    const p = c.profile;
+    if (typeof m.text === 'string') p.status = cleanText(m.text, 24);
+    if (Number.isInteger(m.pose) && m.pose >= 0 && m.pose < POSES) p.pose = m.pose;
     markDirty();
     broadcast(c.room, { t: 'pupdate', p: pub(c) });
   },
 
-  buy(c, m) {
-    const d = CATALOG[m.type], p = c.profile;
-    if (!d || d.price === 0 || p.owned.includes(m.type)) return;
-    if (p.coins < d.price) return send(c, { t: 'toast', text: '金幣不夠,再專注一下吧!' });
-    p.coins -= d.price;
-    p.owned.push(m.type);
+  // 待辦清單:整份覆蓋
+  todos(c, m) {
+    if (!Array.isArray(m.list)) return;
+    c.profile.todos = m.list.slice(0, MAX_TODOS)
+      .map((x) => ({ text: cleanText(x && x.text, 60), done: !!(x && x.done) }))
+      .filter((x) => x.text);
     markDirty();
-    send(c, { t: 'profile', profile: selfProfile(p) });
-    send(c, { t: 'toast', text: `已解鎖「${d.name}」` });
   },
 
   place(c, m) {
     const room = editable(c);
     if (!room) return;
     const d = CATALOG[m.type];
-    if (!d || (d.price > 0 && !c.profile.owned.includes(m.type))) return;
+    if (!d) return;
     if (room.items.length >= MAX_ITEMS) return send(c, { t: 'toast', text: '房間放不下更多東西了' });
     if (!canPlace(room.items, m.type, m.x, m.y)) return;
     room.items.push({ id: room.nextId++, type: m.type, x: m.x, y: m.y });
@@ -319,10 +357,10 @@ function roomChanged(room) {
   broadcast(room.code, { t: 'room', room: roomView(room) });
 }
 
-// 每秒檢查線上玩家的專注是否完成
+// 每秒檢查線上玩家的計時階段是否到期
 setInterval(() => {
   for (const c of byKey.values()) {
-    const reward = settleFocus(c.profile);
+    const reward = settleFocus(c.profile, true);
     if (!reward) continue;
     send(c, { t: 'focus_done', ...reward });
     send(c, { t: 'profile', profile: selfProfile(c.profile) });
