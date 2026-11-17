@@ -247,7 +247,7 @@ const modelsReady = Promise.all(MODEL_NAMES.map((n) => new GLTFLoader().loadAsyn
       if (o.material.name === '_defaultMat') o.visible = false; // 窗戶模型附帶的牆板,用我們自己的牆
       if (n.startsWith('tv') && o.material.name === 'wood') o.material.color.set('#c9794a');
       if (n === 'tv' && o.material.name === 'metal') { // 螢幕:自發光
-        o.material.color.set('#9fd4ee'); o.material.emissive.set('#7fc4f0'); o.material.emissiveIntensity = 0.9;
+        o.material.color.set('#6fa8e8'); o.material.emissive.set('#4f8ff0'); o.material.emissiveIntensity = 0.6;
         MODEL.tvScreen = o.material;
       }
       if (n === 'window') {
@@ -304,9 +304,13 @@ const BUILD = {
     g.userData.anim = (t) => {
       const m = MODEL.tvScreen;
       if (!m) return;
-      m.emissiveIntensity = 0.85 + Math.sin(t / 900) * 0.12 + Math.sin(t / 233) * 0.08;
-      m.emissive.setHSL(0.56 + Math.sin(t / 4000) * 0.06, 0.75, 0.62);
+      const k = 1 + Math.sin(t / 900) * 0.14 + Math.sin(t / 233) * 0.09, hue = 0.6 + Math.sin(t / 4000) * 0.04;
+      m.emissiveIntensity = 0.6 * k;
+      m.emissive.setHSL(hue, 0.85, 0.55);
+      const l = g.userData.glow; // 螢幕前方的光,跟著螢幕一起閃動
+      if (l) { l.intensity = 16 * k; l.color.setHSL(hue, 1, 0.5); }
     };
+    g.userData.glowAt = new THREE.Vector3(0.5, 0.62, 1.05);
   },
 
   cat(g) {
@@ -490,7 +494,7 @@ function rebuildRoom() {
   wallMats[0].color.set(wc); wallMats[1].color.set(wt);
   floorMesh.material.map = floorTex(room.floor); floorMesh.material.needsUpdate = true;
   itemsGroup.clear(); anims = [];
-  let lamps = 0;
+  let lamps = 0, glows = 0;
   for (const it of room.items) {
     if (!CATALOG[it.type]) continue;
     const g = buildItem(it.type);
@@ -499,6 +503,10 @@ function rebuildRoom() {
     if (g.userData.anim) anims.push(g.userData.anim);
     if (g.userData.lampAt && lamps++ < 4) {
       const l = new THREE.PointLight(0xffc27a, 9, 5.5, 1.8); l.position.copy(g.userData.lampAt); g.add(l);
+    }
+    if (g.userData.glowAt && glows++ < 2) { // 最多兩台電視會照亮房間
+      const l = new THREE.PointLight(0x7fc4f0, 6, 4.5, 1.6); l.position.copy(g.userData.glowAt); g.add(l);
+      g.userData.glow = l;
     }
     itemsGroup.add(g);
   }
