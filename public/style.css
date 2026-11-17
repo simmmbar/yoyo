@@ -227,12 +227,13 @@ body.focusing #timerSetup, body.focusing #modes, body.focusing #poses { display:
 .swatches { display: flex; gap: 8px; flex-wrap: wrap; }
 .swatches button { width: 32px; height: 32px; padding: 0; border-radius: 50%; border: 2px solid rgba(255, 255, 255, .25); }
 .swatches button.on { border-color: #fff; box-shadow: 0 0 0 2px var(--accent); }
+.swatches button:not([style]) { width: auto; height: 32px; border-radius: 999px; padding: 0 12px; border-width: 1px; font-size: 13px; }
 .swatches button.txt { width: auto; height: 32px; border-radius: 999px; padding: 0 12px; border-width: 1px; font-size: 13px; }
 .swatches button.txt.on { background: var(--accent); color: var(--accent-ink); border-color: transparent; box-shadow: none; font-weight: 700; }
 .check { display: flex; gap: 8px; align-items: center; margin-top: 16px; font-size: 14px; }
 .check input { accent-color: var(--accent); }
 
-#avatarPreview { align-self: center; width: 170px; height: 170px; flex: none; background: radial-gradient(circle at 50% 70%, rgba(255, 201, 138, .25), transparent 65%); border-radius: 24px; }
+#avatarPreview { align-self: center; width: 210px; height: 210px; flex: none; background: radial-gradient(circle at 50% 70%, rgba(255, 201, 138, .25), transparent 65%); border-radius: 24px; }
 .field { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
 .field input { flex: 1; }
 .row { display: flex; gap: 6px; margin-top: 8px; }

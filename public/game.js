@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
+import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
 
 (() => {
 'use strict';
@@ -20,10 +21,11 @@ const store = {
 // ---------- 常數 ----------
 const WALLH = 4;
 let COLS = 8, ROWS = 6, CATALOG = {};
-const SKIN = ['#ffe3d0', '#f8cdaa', '#e6ad84', '#bd8158', '#85573a'];
-const HAIRC = ['#3a3040', '#6b4630', '#b0733c', '#f0c466', '#ee8aa0', '#7f96e8', '#eeeaf4'];
-const SHIRT = ['#f08d94', '#ffc98a', '#9ed59a', '#7cc3d6', '#8c9cea', '#c09ae0', '#fbf6ec', '#56506e'];
-const LOOK_NAMES = ['男生 A', '女生 A', '男生 B', '女生 B', '男生 C', '光頭'];
+// 膚色是疊在原貼圖上的色調(第一個 = 原色);髮色與上衣的第一個選項也是「原色」
+const SKIN = ['#ffffff', '#ffeadb', '#f4cfb2', '#d6a27c', '#a8704e'];
+const HAIRC = [null, '#4a3f52', '#7a5238', '#c58a4a', '#f2cf7a', '#f29ab0', '#8ea4ee'];
+const SHIRT = [null, '#f08d94', '#ffc98a', '#9ed59a', '#7cc3d6', '#8c9cea', '#c09ae0', '#56506e'];
+const LOOK_NAMES = ['女生 A', '男生 A', '女生 B', '男生 B', '女生 C', '女生 D'];
 const WALLS = [['#f6e6d2', '#fffaf0'], ['#d3e3d3', '#f7fbf2'], ['#ddd6f0', '#f8f5ff'], ['#f7d6d2', '#fff6f2'], ['#d2e3f2', '#f5faff'], ['#6a6c9a', '#8f90bd']];
 const FLOORS = [['#e0b081', '#cf9a68'], ['#a9744e', '#96623f'], ['#ecd9bd', '#dfc8a6'], ['#b9bfcc', '#a8aebd'], ['#c6d9c3', '#b3c9b0'], ['#85708a', '#745f79']];
 
@@ -94,6 +96,8 @@ const on = {
       history.replaceState(null, '', '?room=' + room.code);
     }
     buildEmotes(m.emotes);
+    buildPresets(m.presets || []);
+    applyMood();
     modelsReady.then(() => { rebuildRoom(); buildCatalog(); });
     refreshRoomUI();
     refreshMembers();
@@ -182,7 +186,7 @@ const VIEW_DIR = new THREE.Vector3(1, 0.82, 1).normalize();
 const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 200);
 
 function addLights(sc, shadows) {
-  sc.add(new THREE.HemisphereLight(0xffeedd, 0x8f7fc0, 0.95));
+  const hemi = new THREE.HemisphereLight(0xffeedd, 0x8f7fc0, 0.95);
   const sun = new THREE.DirectionalLight(0xffdcb4, 2.7);
   sun.position.set(COLS / 2 + 7, 13, ROWS + 5);
   sun.target.position.set(COLS / 2 - 1, 0, ROWS / 2 - 1);
@@ -192,9 +196,36 @@ function addLights(sc, shadows) {
     Object.assign(sun.shadow.camera, { left: -11, right: 11, top: 11, bottom: -11, near: 1, far: 40 });
     sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.03; sun.shadow.radius = 5;
   }
-  sc.add(sun, sun.target);
+  // 室內的暖色主燈:白天關著,黃昏和夜晚才亮
+  const roomLight = new THREE.PointLight(0xffc48a, 0, 16, 1.5);
+  roomLight.position.set(COLS / 2, 3.5, ROWS / 2 + 0.5);
+  sc.add(hemi, sun, sun.target, roomLight);
+  return { hemi, sun, roomLight };
 }
-addLights(scene, true);
+const LIGHTS = addLights(scene, true);
+
+// 光線氛圍:白天 / 黃昏 / 夜晚(自動 = 依你當地的時間)
+const MOODS = {
+  day:   { sky: 0xffeedd, ground: 0x8f7fc0, hemi: 0.95, sun: 0xffdcb4, sunI: 2.7, lamp: 9,  room: 0,  exp: 1.12 },
+  dusk:  { sky: 0xffd2b4, ground: 0x7a659e, hemi: 0.7,  sun: 0xff9a62, sunI: 1.8, lamp: 13, room: 14, exp: 1.08 },
+  night: { sky: 0xc4c8ee, ground: 0x4a4266, hemi: 0.5,  sun: 0xb4c0f4, sunI: 0.45, lamp: 20, room: 38, exp: 1.04 },
+};
+let moodPref = store.get('yoyo_mood') || 'auto', mood = 'day';
+const autoMood = () => { const h = new Date().getHours() + new Date().getMinutes() / 60; return h < 6 || h >= 19 ? 'night' : h >= 17 || h < 7.5 ? 'dusk' : 'day'; };
+let lampLights = [];
+function applyMood() {
+  const next = MOODS[moodPref] ? moodPref : autoMood(), changed = next !== mood;
+  mood = next;
+  const m = MOODS[mood];
+  LIGHTS.hemi.color.set(m.sky); LIGHTS.hemi.groundColor.set(m.ground); LIGHTS.hemi.intensity = m.hemi;
+  LIGHTS.sun.color.set(m.sun); LIGHTS.sun.intensity = m.sunI;
+  LIGHTS.roomLight.intensity = m.room;
+  renderer.toneMappingExposure = m.exp;
+  for (const l of lampLights) l.intensity = m.lamp;
+  document.body.dataset.mood = mood;
+  return changed;
+}
+setInterval(() => { if (applyMood()) rebuildRoom(); }, 60000);
 
 // 幾何與材質快取(重建房間時不會洩漏)
 const geos = new Map(), mats = new Map();
@@ -356,8 +387,7 @@ const BUILD = {
   },
 
   window(g) {
-    const hr = new Date().getHours() + new Date().getMinutes() / 60;
-    const mode = hr < 6 || hr >= 19 ? 'night' : (hr >= 17 || hr < 7.5) ? 'dusk' : 'day';
+    const mode = mood;
     const sky = canvasTex('sky' + mode, 256, 224, (c, w, h) => {
       const gr = c.createLinearGradient(0, 0, 0, h);
       const cols = { night: ['#1b2452', '#4a5596'], dusk: ['#6a7cc8', '#ffbe95'], day: ['#8fd0f5', '#e3f5fd'] }[mode];
@@ -406,86 +436,207 @@ function buildItem(type, opt) {
 const SEAT_TYPES = { chair: 0.44, stool: 0.42, armchair: 0.4 }; // 座面高度
 const DESK_TYPES = ['desk', 'table'];
 let seats = []; // {id, x, z, face, h}
-const SIT_FWD = 0.3;
+// 家具的旋轉(r = 0–3,每格 90 度)與旋轉後的佔地
+const rotOf = (r) => (((r | 0) % 4) + 4) % 4;
+const dimsOf = (type, r) => { const d = CATALOG[type]; return d.kind !== 'wall' && rotOf(r) % 2 ? [d.h, d.w] : [d.w, d.h]; };
+// 世界座標 → 這件家具未旋轉時的本地座標(原點在佔地左後角)
+function toLocal(it, wx, wz) {
+  const d = CATALOG[it.type], [W, H] = dimsOf(it.type, it.r), th = rotOf(it.r) * Math.PI / 2;
+  const dx = wx - (it.x + W / 2), dz = wz - (it.y + H / 2);
+  return [dx * Math.cos(th) - dz * Math.sin(th) + d.w / 2, dx * Math.sin(th) + dz * Math.cos(th) + d.h / 2];
+}
 function computeSeats() {
-  const desks = room.items.filter((i) => DESK_TYPES.includes(i.type)).map((i) => ({ it: i, cx: i.x + CATALOG[i.type].w / 2, cz: i.y + 0.5 }));
+  const desks = room.items.filter((i) => DESK_TYPES.includes(i.type));
   seats = room.items.filter((i) => SEAT_TYPES[i.type] != null).sort((a, b) => a.id - b.id).map((i) => {
     const x = i.x + 0.5, z = i.y + 0.5;
-    let best = null, bd = 2.6;
-    for (const d of desks) { const k = Math.hypot(Math.min(Math.max(x, d.it.x + 0.5), d.it.x + CATALOG[d.it.type].w - 0.5) - x, d.cz - z); if (k < bd) { bd = k; best = d; } }
-    // 面向桌子(只取前後左右四個方向);附近沒有桌子就面向房間
-    let face = 0;
-    if (best) { const dx = best.cx - x, dz = best.cz - z; face = Math.abs(dz) >= 0.5 ? (dz > 0 ? 0 : Math.PI) : (dx > 0 ? Math.PI / 2 : -Math.PI / 2); }
-    return { id: i.id, x, z, face, h: SEAT_TYPES[i.type], desk: best?.it.id };
+    let best = null, bd = 2.2, bx = 0, bz = 0;
+    for (const d of desks) { // 找最近的桌子(算到桌面範圍內最近的那一點)
+      const [W, H] = dimsOf(d.type, d.r);
+      const nx = Math.min(Math.max(x, d.x + 0.5), d.x + W - 0.5), nz = Math.min(Math.max(z, d.y + 0.5), d.y + H - 0.5), k = Math.hypot(nx - x, nz - z);
+      if (k < bd) { bd = k; best = d; bx = nx - x; bz = nz - z; }
+    }
+    // 面向桌子(只取前後左右四個方向);附近沒有桌子就照擺放時的方向
+    const face = best ? (Math.abs(bz) >= Math.abs(bx) ? (bz > 0 ? 0 : Math.PI) : (bx > 0 ? Math.PI / 2 : -Math.PI / 2)) : rotOf(i.r) * Math.PI / 2;
+    return { id: i.id, x, z, face, h: SEAT_TYPES[i.type], desk: best?.id };
   });
 }
 function assignSeats() {
   if (!room) return;
-  const sitters = [...players.values()].filter((p) => p.focus && p.focus.phase === 'focus' && !p.pose).sort((a, b) => (a.id < b.id ? -1 : 1));
+  const sitters = [...players.values()].filter((p) => p.focus && p.focus.phase === 'focus' && p.pose !== 1).sort((a, b) => (a.id < b.id ? -1 : 1));
   for (const p of players.values()) p.seat = null;
   sitters.forEach((p, i) => { p.seat = seats[i] || null; });
 }
 
-// ---------- 角色:Quaternius Ultimate Animated Character Pack(CC0) ----------
-const CHAR_FILES = ['Casual_Male', 'Casual_Female', 'Casual2_Male', 'Casual2_Female', 'Casual3_Male', 'Casual_Bald'];
-const AVATAR_H = 1.5;
-const charCache = new Map();
-function loadChar(i) {
-  if (!charCache.has(i)) charCache.set(i, new GLTFLoader().loadAsync(`/assets/characters/${CHAR_FILES[i]}.glb`).then((g) => {
-    g.scene.updateMatrixWorld(true);
-    const bb = new THREE.Box3();
-    g.scene.traverse((o) => {
-      if (!o.isSkinnedMesh) return;
-      o.computeBoundingBox(); bb.union(o.boundingBox.clone().applyMatrix4(o.matrixWorld));
-    });
-    return { scene: g.scene, clips: g.animations, scale: AVATAR_H / (bb.max.y - bb.min.y || 1), minY: bb.min.y };
-  }));
+// ---------- 角色:VRoid 範例角色(VRM,CC0),動作全部用程式擺骨架 ----------
+const CHAR_FILES = ['Sendagaya_Shino', 'Sendagaya_Shibu', 'Vita', 'Sakurada_Fumiriya', 'Vivi', 'Victoria_Rubin'];
+const AV_SCALE = 1.15; // 家具模型偏大,角色放大一點比例才協調
+const AVATAR_H = 1.55 * AV_SCALE, SIT_FWD = 0.2; // 坐下時往桌子靠近一點,手才搆得到鍵盤
+const charCache = new Map(); // 同一個檔案只下載一次;每位玩家各自解析出一份
+const loadChar = (i) => {
+  if (!charCache.has(i)) charCache.set(i, fetch(`/assets/avatars/${CHAR_FILES[i]}.vrm`).then((r) => { if (!r.ok) throw new Error('avatar ' + r.status); return r.arrayBuffer(); }));
   return charCache.get(i);
+};
+const vrmLoader = new GLTFLoader();
+vrmLoader.register((parser) => new VRMLoaderPlugin(parser));
+
+// 把貼圖改成指定顏色:保留明暗,色相換成 tint;mul = true 時改成直接疊色(膚色用,保留腮紅等細節)
+function recolor(tex, tint, mul) {
+  const img = tex.image, cv = document.createElement('canvas');
+  cv.width = img.width; cv.height = img.height;
+  const c = cv.getContext('2d', { willReadFrequently: true });
+  c.drawImage(img, 0, 0);
+  const d = c.getImageData(0, 0, cv.width, cv.height), px = d.data, col = new THREE.Color(tint);
+  let sum = 0, n = 0;
+  for (let i = 0; i < px.length; i += 16) if (px[i + 3] > 40) { sum += px[i] * 0.3 + px[i + 1] * 0.59 + px[i + 2] * 0.11; n++; }
+  const avg = sum / (n || 1) || 128, r = col.r * 255, g = col.g * 255, b = col.b * 255;
+  const sr = (v) => Math.pow(v, 1 / 2.2); // tint 是線性色,轉回 sRGB 再乘
+  const R = sr(col.r) * 255, G = sr(col.g) * 255, B = sr(col.b) * 255;
+  if (mul) for (let i = 0; i < px.length; i += 4) { px[i] *= sr(col.r); px[i + 1] *= sr(col.g); px[i + 2] *= sr(col.b); }
+  else for (let i = 0; i < px.length; i += 4) {
+    const k = Math.min(1.7, (px[i] * 0.3 + px[i + 1] * 0.59 + px[i + 2] * 0.11) / avg);
+    px[i] = Math.min(255, R * k); px[i + 1] = Math.min(255, G * k); px[i + 2] = Math.min(255, B * k);
+  }
+  c.putImageData(d, 0, 0);
+  const t = tex.clone(); t.image = cv; t.needsUpdate = true;
+  return t;
 }
-// 立刻回傳一個空群組,模型載入後再填入;皮膚、頭髮、上衣依材質名稱換色
+function tintAvatar(vrm, a) {
+  const done = new Map();
+  const swap = (tex, tint, mul) => { if (!tex?.image) return tex; const k = tex.uuid + tint; if (!done.has(k)) done.set(k, recolor(tex, tint, mul)); return done.get(k); };
+  vrm.scene.traverse((o) => {
+    if (!o.isMesh) return;
+    o.castShadow = true; o.receiveShadow = false; o.frustumCulled = false;
+    for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
+      const n = m.name || '';
+      const skin = /SKIN/.test(n) && a.skin > 0;
+      const tint = skin ? SKIN[a.skin] : /HAIR/.test(n) ? HAIRC[a.hairColor] : /Tops|Onepiece/.test(n) ? SHIRT[a.shirt] : null;
+      if (!tint) continue;
+      const old = m.map, oldShade = m.shadeMultiplyTexture;
+      m.map = swap(old, tint, skin);
+      m.shadeMultiplyTexture = oldShade === old ? m.map : swap(oldShade, tint, skin);
+      if (m.uniforms?.map) m.uniforms.map.value = m.map;
+      if (m.uniforms?.shadeMultiplyTexture) m.uniforms.shadeMultiplyTexture.value = m.shadeMultiplyTexture;
+      if (!skin) m.shadeColorFactor?.set(tint).multiplyScalar(0.72);
+    }
+  });
+}
+
+// 立刻回傳一個空群組,模型載入後再填入
 function buildAvatar(a, onReady) {
   const g = new THREE.Group();
-  g.userData = { ready: false };
-  loadChar(a.hair % CHAR_FILES.length).then((c) => {
-    const m = cloneSkinned(c.scene);
-    m.scale.setScalar(c.scale); m.position.y = -c.minY * c.scale;
-    const tints = { Skin: SKIN[a.skin], Hair: HAIRC[a.hairColor], Shirt: SHIRT[a.shirt], Pants: '#5d5f86', Belt: '#3b3a4a', Face: '#3a2f3c' };
-    m.traverse((o) => {
-      if (!o.isMesh) return;
-      o.castShadow = o.receiveShadow = true; o.frustumCulled = false;
-      o.material = o.material.clone();
-      if (tints[o.material.name]) o.material.color.set(tints[o.material.name]);
-      o.material.roughness = 0.8; o.material.metalness = 0;
-    });
-    const mixer = new THREE.AnimationMixer(m), act = {};
-    for (const n of ['Idle', 'Walk', 'SitDown', 'Victory']) {
-      const clip = c.clips.find((k) => k.name === n);
-      if (clip) act[n] = mixer.clipAction(clip);
-    }
-    if (act.SitDown) { act.SitDown.loop = THREE.LoopOnce; act.SitDown.clampWhenFinished = true; }
-    act.Idle?.play(); mixer.update(0);
-    g.add(m);
-    // 專注坐下時,屁股底下的小凳子
-    const seat = MODEL.chair_stool ? put(g, 'chair_stool', 0.62, 0, 0, -0.12) : null;
-    if (seat) seat.visible = false;
-    g.userData = { ready: true, mixer, act, cur: 'Idle', seat };
+  g.userData = { ready: false, dead: false };
+  loadChar(a.hair % CHAR_FILES.length).then((buf) => vrmLoader.parseAsync(buf.slice(0), '')).then((gltf) => {
+    const vrm = gltf.userData.vrm;
+    if (g.userData.dead) return VRMUtils.deepDispose(vrm.scene);
+    VRMUtils.removeUnnecessaryVertices(vrm.scene);
+    VRMUtils.rotateVRM0(vrm); // 舊版 VRM 面向 -z,轉成面向 +z
+    tintAvatar(vrm, a);
+    vrm.scene.scale.setScalar(AV_SCALE);
+    g.add(vrm.scene);
+    const H = vrm.humanoid, bone = {};
+    for (const n of BONES) bone[n] = H.getNormalizedBoneNode(n);
+    const gaze = new THREE.Object3D(); scene.add(gaze);
+    if (vrm.lookAt) vrm.lookAt.target = gaze;
+    g.userData = { ...g.userData, ready: true, vrm, bone, gaze, hipsY: bone.hips.position.y, flip: vrm.meta?.metaVersion === '0' ? -1 : 1, blinkAt: 2, blink: 0, ph: Math.random() * 6, seat: null, book: null };
+    poseAvatar(g, 0, {});
     onReady?.(g);
-  });
+  }).catch((e) => console.error('avatar load failed', e));
   return g;
 }
-function poseAvatar(g, dt, walking, sitting, ownStool, cheering) {
+function disposeAvatar(g) {
+  const u = g.userData;
+  u.dead = true;
+  if (u.gaze) scene.remove(u.gaze);
+  if (u.vrm) VRMUtils.deepDispose(u.vrm.scene);
+}
+
+// 骨架姿勢:角度以「角色面向 +z、左手在 +x」為準,[x, y, z] 弧度
+const BONES = ['hips', 'spine', 'chest', 'neck', 'head', 'leftUpperArm', 'rightUpperArm', 'leftLowerArm', 'rightLowerArm', 'leftHand', 'rightHand', 'leftUpperLeg', 'rightUpperLeg', 'leftLowerLeg', 'rightLowerLeg', 'leftFoot', 'rightFoot'];
+const ORDER = { leftLowerArm: 'YXZ', rightLowerArm: 'YXZ' }; // 前臂:先轉手腕朝向,再彎手肘
+const tmpE = new THREE.Euler(), tmpQ = new THREE.Quaternion();
+// st: { walking, sitting, pose(0 打字 / 1 站 / 2 看書 / 3 寫字), cheering, seatH, ownStool, t }
+function poseAvatar(g, dt, st) {
   const u = g.userData;
   if (!u.ready) return;
-  const want = walking ? 'Walk' : cheering && u.act.Victory ? 'Victory' : sitting && u.act.SitDown ? 'SitDown' : 'Idle';
-  if (want !== u.cur && u.act[want]) {
-    u.act[want].reset().fadeIn(0.2).play();
-    u.act[u.cur]?.fadeOut(0.2);
-    u.cur = want;
+  const t = (st.t || 0) / 1000 + u.ph, P = {}, sin = Math.sin;
+  const arms = (down, fwd, elbow, twist, spread = 0) => {
+    P.leftUpperArm = [-fwd, 0, -down]; P.rightUpperArm = [-fwd, 0, down];
+    P.leftLowerArm = [twist, -elbow - spread, 0]; P.rightLowerArm = [twist, elbow + spread, 0];
+  };
+  const breathe = sin(t * 1.6) * 0.012;
+  let hipsY = u.hipsY, mode = 'idle';
+  if (st.walking) {
+    mode = 'walk';
+    const w = t * 9, a = sin(w);
+    P.leftUpperLeg = [-a * 0.42, 0, 0]; P.rightUpperLeg = [a * 0.42, 0, 0];
+    P.leftLowerLeg = [Math.max(0, -Math.cos(w)) * 0.7, 0, 0]; P.rightLowerLeg = [Math.max(0, Math.cos(w)) * 0.7, 0, 0];
+    P.leftUpperArm = [a * 0.35, 0, -1.27]; P.rightUpperArm = [-a * 0.35, 0, 1.27];
+    P.leftLowerArm = [0, -0.35, 0]; P.rightLowerArm = [0, 0.35, 0];
+    P.spine = [0.03, -a * 0.04, 0]; hipsY += Math.abs(Math.cos(w)) * 0.025 - 0.02;
+  } else if (st.cheering) {
+    mode = 'cheer';
+    const b = Math.abs(sin(t * 7));
+    P.leftUpperArm = [0, 0, 1.0 + b * 0.25]; P.rightUpperArm = [0, 0, -1.0 - b * 0.25];
+    P.leftLowerArm = [0, -0.5, 0]; P.rightLowerArm = [0, 0.5, 0];
+    P.leftUpperLeg = [-b * 0.25, 0, 0]; P.rightUpperLeg = [-b * 0.25, 0, 0]; P.leftLowerLeg = [b * 0.5, 0, 0]; P.rightLowerLeg = [b * 0.5, 0, 0];
+    P.head = [-0.15, 0, 0]; hipsY += b * 0.05 - 0.03;
+  } else if (st.sitting) {
+    mode = 'sit';
+    hipsY = (st.seatH || 0.42) / AV_SCALE + 0.09;
+    P.leftUpperLeg = [-1.5, 0, 0.06]; P.rightUpperLeg = [-1.5, 0, -0.06];
+    P.leftLowerLeg = [1.45, 0, 0]; P.rightLowerLeg = [1.45, 0, 0];
+    P.spine = [0.1 + breathe, 0, 0]; P.chest = [0.05, 0, 0];
+    if (st.pose === 2) { // 看書:雙手把書舉在胸前
+      arms(1.2, 0.4, 1.55, 0.3, -0.2);
+      P.neck = [0.22, 0, 0]; P.head = [0.18 + sin(t * 0.5) * 0.03, sin(t * 0.23) * 0.05, 0];
+    } else if (st.pose === 3) { // 寫字:左手壓著紙,右手小幅移動
+      arms(1.15, 0.5, 1.38, 1.3);
+      const k = sin(t * 7) * 0.05, k2 = sin(t * 1.3) * 0.1;
+      P.rightLowerArm = [1.3, 1.38 + k2 + k, 0]; P.rightHand = [0, 0, k * 2];
+      P.neck = [0.3, 0, 0]; P.head = [0.22, -0.12 + k2 * 0.3, 0];
+    } else { // 打字:雙手放在鍵盤上,手指輕敲
+      arms(1.15, 0.5, 1.38, 1.3);
+      P.leftHand = [0, 0, -0.12 + sin(t * 13) * 0.07]; P.rightHand = [0, 0, 0.12 + sin(t * 11 + 1) * 0.07];
+      P.neck = [0.14, 0, 0]; P.head = [0.1 + sin(t * 0.4) * 0.03, sin(t * 0.27) * 0.06, 0];
+    }
+  } else { // 站著:雙手自然垂下,輕微晃動
+    arms(1.27, 0.03, 0.18, 0.2);
+    P.spine = [breathe, 0, sin(t * 0.7) * 0.015]; P.head = [0, sin(t * 0.31) * 0.08, 0];
+    P.leftUpperLeg = [0, 0, 0.03]; P.rightUpperLeg = [0, 0, -0.03];
   }
-  if (!u.seat && MODEL.chair_stool) u.seat = put(g, 'chair_stool', 0.62, 0, 0, -0.12); // 家具模型可能比角色晚載入
-  if (u.seat) u.seat.visible = u.cur === 'SitDown' && ownStool;
-  u.mixer.update(dt);
+  const k = dt ? 1 - Math.exp(-dt * (mode === 'walk' ? 18 : 9)) : 1, f = u.flip;
+  for (const n of BONES) {
+    const b = u.bone[n]; if (!b || n === 'hips') continue;
+    const r = P[n] || [0, 0, 0];
+    tmpQ.setFromEuler(tmpE.set(r[0] * f, r[1], r[2] * f, ORDER[n] || 'XYZ'));
+    b.quaternion.slerp(tmpQ, k);
+  }
+  u.bone.hips.position.y += (hipsY - u.bone.hips.position.y) * k;
+  // 眨眼與表情
+  const em = u.vrm.expressionManager;
+  if (em) {
+    u.blinkAt -= dt;
+    if (u.blinkAt < 0) { u.blink = 0.14; u.blinkAt = 2 + Math.random() * 4; }
+    u.blink = Math.max(0, u.blink - dt);
+    em.setValue('blink', u.blink > 0 ? 1 - Math.abs(u.blink - 0.07) / 0.07 : 0);
+    em.setValue('happy', mode === 'cheer' ? 1 : 0);
+  }
+  // 視線:站著時看鏡頭,坐著時看桌面
+  if (mode === 'sit') g.localToWorld(tmpV2.set(0, 0.8, 0.55)); else tmpV2.copy(camera.position);
+  u.gaze.position.lerp(tmpV2, dt ? Math.min(1, dt * 4) : 1);
+  // 沒有空椅子時自備的小凳子、看書時手上的書
+  if (!u.seat && MODEL.chair_stool) u.seat = put(g, 'chair_stool', 0.62, 0, 0, 0);
+  if (u.seat) u.seat.visible = mode === 'sit' && !!st.ownStool;
+  if (!u.book) {
+    u.book = new THREE.Group();
+    u.book.add(box(0.34, 0.02, 0.24, BOOKS[3], 0, 0, 0, 0.006), box(0.31, 0.012, 0.22, CREAM, 0, 0.016, 0, 0.004));
+    u.book.rotation.x = 0.7; g.add(u.book);
+  }
+  u.book.visible = mode === 'sit' && st.pose === 2;
+  u.book.position.set(0, (st.seatH || 0.42) + 0.5, 0.42);
+  u.vrm.update(dt);
 }
+const tmpV2 = new THREE.Vector3();
 
 // ---------- 房間 ----------
 const roomGroup = new THREE.Group(), itemsGroup = new THREE.Group(), playersGroup = new THREE.Group();
@@ -538,6 +689,17 @@ function buildShell() {
   fitCamera();
 }
 const itemPos = (g, type, x, y) => g.position.set(x, 0, CATALOG[type].kind === 'wall' ? 0 : y);
+// 把家具包一層,繞著佔地中心轉到指定方向(face 弧度,0 = 朝 +z)
+function wrapItem(inner, type, face) {
+  const d = CATALOG[type], g = new THREE.Group();
+  if (d.kind === 'wall' || !face) { g.add(inner); return g; }
+  const odd = Math.round(face / (Math.PI / 2)) % 2 !== 0, W = odd ? d.h : d.w, H = odd ? d.w : d.h;
+  const piv = new THREE.Group();
+  piv.position.set(W / 2, 0, H / 2); piv.rotation.y = face;
+  inner.position.set(-d.w / 2, 0, -d.h / 2);
+  piv.add(inner); g.add(piv);
+  return g;
+}
 function rebuildRoom() {
   if (!room || !MODEL[MODEL_NAMES[0]]) return;
   if (!floorMesh) buildShell();
@@ -547,31 +709,29 @@ function rebuildRoom() {
   itemsGroup.clear(); anims = [];
   computeSeats(); assignSeats();
   let lamps = 0, glows = 0;
+  lampLights = [];
   for (const it of room.items) {
     if (!CATALOG[it.type]) continue;
-    let opt;
+    let opt, face = rotOf(it.r) * Math.PI / 2;
     if (it.type === 'desk') { // 筆電擺在有椅子的那一側
       const st = seats.find((q) => q.desk === it.id);
-      if (st) opt = { side: st.z > it.y + 0.5 ? 1 : -1, sx: Math.min(1.6, Math.max(0.4, st.x - it.x)) };
+      if (st) { const [lx, lz] = toLocal(it, st.x, st.z); opt = { side: lz > 0.5 ? 1 : -1, sx: Math.min(1.6, Math.max(0.4, lx)) }; }
     }
-    const g = buildItem(it.type, opt);
+    const inner = buildItem(it.type, opt);
     const st = seats.find((q) => q.id === it.id);
-    if (st) { // 椅子模型預設朝向 +z,轉向它面對的桌子
-      const piv = new THREE.Group();
-      piv.position.set(0.5, 0, 0.5); piv.rotation.y = st.face;
-      for (const c of [...g.children]) { c.position.x -= 0.5; c.position.z -= 0.5; piv.add(c); }
-      g.add(piv);
+    if (st) face = st.face; // 椅子自動轉向它面對的桌子
+    if (inner.userData.lampAt && lamps++ < 4) {
+      const l = new THREE.PointLight(0xffc27a, MOODS[mood].lamp, 5.5, 1.8); l.position.copy(inner.userData.lampAt); inner.add(l);
+      lampLights.push(l);
     }
+    if (inner.userData.glowAt && glows++ < 2) { // 最多兩台電視會照亮房間
+      const l = new THREE.PointLight(0x7fc4f0, 6, 4.5, 1.6); l.position.copy(inner.userData.glowAt); inner.add(l);
+      inner.userData.glow = l;
+    }
+    if (inner.userData.anim) anims.push(inner.userData.anim);
+    const g = wrapItem(inner, it.type, face);
     itemPos(g, it.type, it.x, it.y);
     g.userData.itemId = it.id;
-    if (g.userData.anim) anims.push(g.userData.anim);
-    if (g.userData.lampAt && lamps++ < 4) {
-      const l = new THREE.PointLight(0xffc27a, 9, 5.5, 1.8); l.position.copy(g.userData.lampAt); g.add(l);
-    }
-    if (g.userData.glowAt && glows++ < 2) { // 最多兩台電視會照亮房間
-      const l = new THREE.PointLight(0x7fc4f0, 6, 4.5, 1.6); l.position.copy(g.userData.glowAt); g.add(l);
-      g.userData.glow = l;
-    }
     itemsGroup.add(g);
   }
   syncGhost();
@@ -586,7 +746,7 @@ function syncGhost() {
   const hk = holding && CATALOG[holding.type].kind;
   if (gridLines) { gridLines.visible = !!hk && hk !== 'wall'; wallLines.visible = hk === 'wall'; }
   for (const g of itemsGroup.children) g.visible = !(holding?.fromId && g.userData.itemId === holding.fromId);
-  if (holding) { ghost = buildItem(holding.type); ghost.visible = false; scene.add(ghost); }
+  if (holding) { ghost = wrapItem(buildItem(holding.type), holding.type, rotOf(holding.r) * Math.PI / 2); ghost.visible = false; scene.add(ghost); }
   ghostPad.visible = false;
 }
 
@@ -695,7 +855,7 @@ let view = store.get('yoyo_view') || 'desk', autoIdx = 0, autoAt = 0, activeView
 const myPos = () => { const p = players.get(me); return p ? new THREE.Vector3(p.x, 0, p.y) : new THREE.Vector3(COLS / 2, 0, ROWS / 2); };
 const VIEWS = {
   room: { yaw: 45, pitch: 27, dist: () => roomDist, target: () => new THREE.Vector3(COLS / 2 - 0.3, 1.2, ROWS / 2 - 0.3) },
-  desk: { yaw: 24, pitch: 13, dist: () => 8.5 * Math.max(1, 1.25 / camera.aspect), target: () => myPos().add(new THREE.Vector3(camera.aspect < 1 ? -0.3 : 0, camera.aspect < 1 ? 0.4 : 1.05, 0.2)) },
+  desk: { yaw: 22, pitch: 11, dist: () => 5.6 * Math.max(1, 1.25 / camera.aspect), target: () => myPos().add(new THREE.Vector3(camera.aspect < 1 ? -0.3 : 0, camera.aspect < 1 ? 0.4 : 1.05, 0.2)) },
   side: { yaw: 68, pitch: 18, dist: () => 11, target: () => myPos().add(new THREE.Vector3(-0.4, 0.95, 0)) },
 };
 const AUTO = ['desk', 'room', 'side'];
@@ -765,13 +925,15 @@ function renderAvatarPreview() {
   if (!draft) return;
   const seq = ++previewSeq; // 只畫最後一次選擇
   buildAvatar(draft.avatar, (g) => {
-    if (seq !== previewSeq) return;
-    const cv = $('#avatarPreview'), c2 = cv.getContext('2d');
-    thumbScene.add(g);
-    thumbCam.position.set(0, AVATAR_H * 0.52, 0).addScaledVector(FRONT_DIR, 20); thumbCam.lookAt(0, AVATAR_H * 0.52, 0);
-    Object.assign(thumbCam, { left: -0.95, right: 0.95, top: 0.95, bottom: -0.95 }); thumbCam.updateProjectionMatrix();
-    thumb.render(thumbScene, thumbCam); thumbScene.remove(g);
-    c2.clearRect(0, 0, cv.width, cv.height); c2.drawImage(thumb.domElement, 0, 0, cv.width, cv.height);
+    if (seq === previewSeq) {
+      const cv = $('#avatarPreview'), c2 = cv.getContext('2d');
+      thumbScene.add(g);
+      thumbCam.position.set(0, 0.95, 0).addScaledVector(FRONT_DIR, 20); thumbCam.lookAt(0, 0.95, 0);
+      Object.assign(thumbCam, { left: -1, right: 1, top: 1, bottom: -1 }); thumbCam.updateProjectionMatrix();
+      thumb.render(thumbScene, thumbCam); thumbScene.remove(g);
+      c2.clearRect(0, 0, cv.width, cv.height); c2.drawImage(thumb.domElement, 0, 0, cv.width, cv.height);
+    }
+    disposeAvatar(g);
   });
 }
 
@@ -779,7 +941,7 @@ function renderAvatarPreview() {
 function syncPlayerObj(p) {
   const key = JSON.stringify(p.avatar);
   if (p.key !== key) {
-    if (p.obj) playersGroup.remove(p.obj);
+    if (p.obj) { playersGroup.remove(p.obj); disposeAvatar(p.obj); }
     p.obj = buildAvatar(p.avatar); p.key = key;
     p.obj.rotation.y = p.heading ?? Math.PI / 4;
     playersGroup.add(p.obj);
@@ -798,7 +960,7 @@ function syncPlayerObj(p) {
 function removePlayer(id) {
   const p = players.get(id);
   if (!p) return;
-  if (p.obj) playersGroup.remove(p.obj);
+  if (p.obj) { playersGroup.remove(p.obj); disposeAvatar(p.obj); }
   p.el?.remove();
   players.delete(id);
 }
@@ -817,15 +979,19 @@ function showEmote(p, e) {
 const mmss = (s) => String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
 const fmt = (ms) => mmss(Math.max(0, Math.ceil(ms / 1000)));
 const fmtUp = (ms) => mmss(Math.max(0, Math.floor(ms / 1000)));
-function canPlace(type, x, y, ignoreId) {
+function canPlace(type, x, y, r, ignoreId) {
   const d = CATALOG[type];
-  if (!d || x < 0 || x + d.w > COLS) return false;
+  if (!d) return false;
+  const [w, h] = dimsOf(type, r);
+  if (x < 0 || x + w > COLS) return false;
   if (d.kind === 'wall') { if (y !== 0) return false; }
-  else if (y < 0 || y + d.h > ROWS) return false;
+  else if (y < 0 || y + h > ROWS) return false;
   return !room.items.some((it) => {
     if (it.id === ignoreId) return false;
     const o = CATALOG[it.type];
-    return o && o.kind === d.kind && x < it.x + o.w && it.x < x + d.w && y < it.y + o.h && it.y < y + d.h;
+    if (!o || o.kind !== d.kind) return false;
+    const [ow, oh] = dimsOf(it.type, it.r);
+    return x < it.x + ow && it.x < x + w && y < it.y + oh && it.y < y + h;
   });
 }
 
@@ -846,23 +1012,23 @@ function frame(t) {
     const dx = gx - p.x, dy = gy - p.y, d = Math.hypot(dx, dy);
     const walking = d > 0.02;
     if (walking) {
-      const s = Math.min(d, 3.2 * dt);
+      const s = Math.min(d, 2.1 * dt);
       p.x += (dx / d) * s; p.y += (dy / d) * s;
     }
     const f = p.focus && (p.focus.mode === 'up' || p.focus.endAt > t) ? p.focus : null;
-    const sitting = !!f && f.phase === 'focus' && !p.pose && !walking;
+    const sitting = !!f && f.phase === 'focus' && p.pose !== 1 && !walking;
     const want = walking ? Math.atan2(dx, dy) : sitting && p.seat ? p.seat.face : 0.35;
     let diff = want - p.obj.rotation.y;
     diff = Math.atan2(Math.sin(diff), Math.cos(diff));
     p.obj.rotation.y += diff * Math.min(1, dt * 12);
     p.heading = p.obj.rotation.y;
-    // 坐下的動作會把身體往後移,坐在椅子上時往前補回來,屁股才會落在椅面上
     const fwd = sitting && p.seat ? SIT_FWD : 0;
     p.sit = (p.sit || 0) + (fwd - (p.sit || 0)) * Math.min(1, dt * 8);
     p.obj.position.set(p.x + Math.sin(p.obj.rotation.y) * p.sit, 0, p.y + Math.cos(p.obj.rotation.y) * p.sit);
-    poseAvatar(p.obj, dt, walking, sitting, !p.seat, p.cheerUntil > t);
+    poseAvatar(p.obj, dt, { walking, sitting, pose: p.pose, cheering: p.cheerUntil > t, seatH: p.seat?.h, ownStool: !p.seat, t });
+    p.labelY = (p.labelY || AVATAR_H) + ((sitting ? 1.42 : AVATAR_H) - (p.labelY || AVATAR_H)) * Math.min(1, dt * 6);
     // 標籤
-    tmpV.set(p.x, AVATAR_H + 0.12, p.y).project(camera);
+    tmpV.set(p.x, p.labelY + 0.14, p.y).project(camera);
     p.el.style.transform = `translate(${((tmpV.x + 1) / 2) * sw}px, ${((1 - tmpV.y) / 2) * sh}px) translate(-50%, -100%)`;
     if (f) {
       const txt = (f.phase === 'break' ? '休息 ' : '') + focusClock(f, t);
@@ -875,10 +1041,10 @@ function frame(t) {
     ghost.visible = ghostPad.visible = !!hover;
     if (hover) {
       itemPos(ghost, holding.type, hover.x, hover.y);
-      const ok = canPlace(holding.type, hover.x, hover.y, holding.fromId);
+      const ok = canPlace(holding.type, hover.x, hover.y, holding.r, holding.fromId), [gw, gh] = dimsOf(holding.type, holding.r);
       ghostPad.material.color.set(ok ? '#8fe08a' : '#ff7d88');
       if (d.kind === 'wall') { ghostPad.rotation.set(0, 0, 0); ghostPad.scale.set(d.w, WALLH - 0.25, 1); ghostPad.position.set(hover.x + d.w / 2, WALLH / 2 + 0.125, 0.015); }
-      else { ghostPad.rotation.set(-Math.PI / 2, 0, 0); ghostPad.scale.set(d.w, d.h, 1); ghostPad.position.set(hover.x + d.w / 2, 0.05, hover.y + d.h / 2); }
+      else { ghostPad.rotation.set(-Math.PI / 2, 0, 0); ghostPad.scale.set(gw, gh, 1); ghostPad.position.set(hover.x + gw / 2, 0.05, hover.y + gh / 2); }
     }
   }
   if (post) post.render(); else renderer.render(scene, camera);
@@ -901,10 +1067,10 @@ function pick(ev) { // → {wall, x, z}:地板座標,或牆面上的 x
 }
 function tileAt(pt) { // 拿著家具時,讓家具以游標為中心
   if (!pt || !holding) return null;
-  const d = CATALOG[holding.type];
-  if (d.kind === 'wall') return { x: Math.floor(pt.x - (d.w - 1) / 2), y: 0 };
+  const d = CATALOG[holding.type], [w, h] = dimsOf(holding.type, holding.r);
+  if (d.kind === 'wall') return { x: Math.floor(pt.x - (w - 1) / 2), y: 0 };
   if (pt.wall) return null;
-  return { x: Math.floor(pt.x - (d.w - 1) / 2), y: Math.floor(pt.z - (d.h - 1) / 2) };
+  return { x: Math.floor(pt.x - (w - 1) / 2), y: Math.floor(pt.z - (h - 1) / 2) };
 }
 // 拖曳 = 轉動鏡頭;沒有移動的點擊 = 走路 / 放家具;滾輪或雙指 = 縮放
 const ptrs = new Map();
@@ -940,16 +1106,16 @@ canvas.addEventListener('pointerup', (ev) => {
   const pt = pick(ev);
   if (holding) {
     const tl = (hover = tileAt(pt));
-    if (!tl || !canPlace(holding.type, tl.x, tl.y, holding.fromId)) return toast('這裡放不下');
-    if (holding.fromId) { send({ t: 'move_item', id: holding.fromId, x: tl.x, y: tl.y }); setHolding(null); }
-    else send({ t: 'place', type: holding.type, x: tl.x, y: tl.y });
+    if (!tl || !canPlace(holding.type, tl.x, tl.y, holding.r, holding.fromId)) return toast('這裡放不下');
+    if (holding.fromId) { send({ t: 'move_item', id: holding.fromId, x: tl.x, y: tl.y, r: rotOf(holding.r) }); setHolding(null); }
+    else send({ t: 'place', type: holding.type, x: tl.x, y: tl.y, r: rotOf(holding.r) });
     return;
   }
   if (editing()) { // 佈置面板開著:點家具可拿起
     let o = ray.intersectObjects(itemsGroup.children, true)[0]?.object;
     while (o && o.userData.itemId == null) o = o.parent;
     const it = o && room.items.find((i) => i.id === o.userData.itemId);
-    if (it) return setHolding({ type: it.type, fromId: it.id });
+    if (it) return setHolding({ type: it.type, fromId: it.id, r: rotOf(it.r) });
   }
   const p = players.get(me);
   if (!p || !pt || pt.wall) return;
@@ -957,7 +1123,16 @@ canvas.addEventListener('pointerup', (ev) => {
   p.ty = Math.min(ROWS - 0.15, Math.max(0.2, pt.z));
   send({ t: 'move', x: p.tx, y: p.ty });
 });
-window.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') setHolding(null); });
+window.addEventListener('keydown', (ev) => {
+  if (ev.key === 'Escape') setHolding(null);
+  if ((ev.key === 'r' || ev.key === 'R') && holding && !/INPUT|TEXTAREA/.test(document.activeElement?.tagName || '')) rotateHolding();
+});
+function rotateHolding() {
+  if (!holding || CATALOG[holding.type].kind === 'wall') return;
+  const keep = hover;
+  setHolding({ ...holding, r: rotOf((holding.r || 0) + 1) });
+  hover = keep;
+}
 
 // ---------- 面板(底部工具列開關右側抽屜) ----------
 let currentTab = null;
@@ -1267,12 +1442,14 @@ function setHolding(h) {
   syncGhost();
   $('#editBar').hidden = !h;
   if (h) {
-    $('#editHint').textContent = h.fromId ? `移動「${CATALOG[h.type].name}」:點選新的位置` : `放置「${CATALOG[h.type].name}」:點選位置(可連續放)`;
+    $('#editHint').textContent = h.fromId ? `移動「${CATALOG[h.type].name}」:點選新的位置` : `放置「${CATALOG[h.type].name}」:點選位置`;
     $('#editRemove').hidden = !h.fromId;
+    $('#editRotate').hidden = CATALOG[h.type].kind === 'wall';
   }
   document.querySelectorAll('.item').forEach((x) => x.classList.toggle('on', !!h && !h.fromId && x.dataset.type === h.type));
 }
 $('#editCancel').addEventListener('click', () => setHolding(null));
+$('#editRotate').addEventListener('click', rotateHolding);
 $('#editRemove').addEventListener('click', () => { if (holding?.fromId) send({ t: 'remove_item', id: holding.fromId }); setHolding(null); });
 
 function buildCatalog() {
@@ -1286,6 +1463,13 @@ function buildCatalog() {
       setHolding(holding && !holding.fromId && holding.type === type ? null : { type });
     });
     return card;
+  }));
+}
+function buildPresets(list) {
+  $('#presets2').replaceChildren(...list.map((p) => {
+    const b = el('button', { type: 'button', textContent: p.name });
+    b.onclick = () => { if (confirm(`換成成品房間「${p.name}」?目前房間裡的擺設會被取代。`)) { setHolding(null); send({ t: 'preset', key: p.key }); } };
+    return b;
   }));
 }
 function swatches(box, palettes, key) {
@@ -1305,6 +1489,7 @@ function refreshRoomUI() {
   swatches($('#wallSwatches'), WALLS, 'wall');
   swatches($('#floorSwatches'), FLOORS, 'floor');
   $('#guestsEditRow').hidden = !room.mine;
+  $('#presetRow').hidden = !room.mine;
   $('#guestsEdit').checked = room.guestsEdit;
 }
 $('#guestsEdit').addEventListener('change', (ev) => send({ t: 'room_settings', guestsEdit: ev.target.checked }));
@@ -1335,10 +1520,10 @@ function pushProfile() {
 }
 function buildAvatarOptions() {
   const rows = [
-    ['膚色', 'skin', SKIN.map((c) => ({ color: c }))],
+    ['膚色', 'skin', SKIN.map((c, i) => (i ? { color: c } : { text: '原色' }))],
     ['造型', 'hair', LOOK_NAMES.map((n) => ({ text: n }))],
-    ['髮色', 'hairColor', HAIRC.map((c) => ({ color: c }))],
-    ['上衣', 'shirt', SHIRT.map((c) => ({ color: c }))],
+    ['髮色', 'hairColor', HAIRC.map((c) => (c ? { color: c } : { text: '原色' }))],
+    ['上衣', 'shirt', SHIRT.map((c) => (c ? { color: c } : { text: '原色' }))],
   ];
   $('#avatarOptions').replaceChildren(...rows.flatMap(([title, key, opts]) => [
     el('h3', { textContent: title }),
@@ -1356,7 +1541,17 @@ $('#nameInput').addEventListener('input', (ev) => {
   if (v) { draft.name = v; pushProfile(); }
 });
 
-// ---------- 設定:存檔、房間 ----------
+// ---------- 設定:光線、存檔、房間 ----------
+function refreshMoodUI() { document.querySelectorAll('#moods button').forEach((x) => x.classList.toggle('on', x.dataset.mood === moodPref)); }
+$('#moods').addEventListener('click', (ev) => {
+  const b = ev.target.closest('button');
+  if (!b) return;
+  moodPref = b.dataset.mood; store.set('yoyo_mood', moodPref);
+  refreshMoodUI();
+  if (applyMood()) rebuildRoom();
+});
+refreshMoodUI();
+
 $('#saveCode').value = token;
 $('#showCode').addEventListener('click', (ev) => {
   const inp = $('#saveCode'), show = inp.type === 'password';

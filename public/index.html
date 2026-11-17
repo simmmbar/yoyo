@@ -6,7 +6,7 @@
 <title>悠悠自習室</title>
 <link rel="stylesheet" href="style.css">
 <script type="importmap">
-{ "imports": { "three": "/vendor/three/three.module.js", "three/addons/": "/vendor/addons/" } }
+{ "imports": { "three": "/vendor/three/three.module.js", "three/addons/": "/vendor/addons/", "@pixiv/three-vrm": "/vendor/three-vrm.js" } }
 </script>
 </head>
 <body>
@@ -55,8 +55,10 @@
     </div>
     <input id="statusInput" maxlength="24" placeholder="正在做什麼?(會顯示在頭上)" autocomplete="off">
     <div class="seg small" id="poses">
-      <button data-pose="0" class="on">坐著專注</button>
-      <button data-pose="1">站著專注</button>
+      <button data-pose="0" class="on">打字</button>
+      <button data-pose="2">看書</button>
+      <button data-pose="3">寫字</button>
+      <button data-pose="1">站著</button>
     </div>
     <button id="focusBtn" class="primary">開始專注</button>
     <button id="partyBtn" hidden title="房間裡的人可以選擇加入,大家同時開始、同時結束">發起共同專注</button>
@@ -91,6 +93,7 @@
 
 <div id="editBar" hidden>
   <span id="editHint"></span>
+  <button id="editRotate">旋轉 (R)</button>
   <button id="editRemove" hidden>收回這件</button>
   <button id="editCancel">取消</button>
 </div>
@@ -138,6 +141,10 @@
   <div class="tab" id="tab-decor">
     <p class="hint" id="decorHint"></p>
     <div id="decorBody">
+      <div id="presetRow">
+        <h3>成品房間</h3>
+        <div class="swatches" id="presets2"></div>
+      </div>
       <h3>家具</h3>
       <div id="catalog"></div>
       <h3>牆面</h3>
@@ -157,6 +164,14 @@
   </div>
 
   <div class="tab" id="tab-settings">
+    <h3>光線</h3>
+    <div class="seg small" id="moods">
+      <button data-mood="auto">自動</button>
+      <button data-mood="day">白天</button>
+      <button data-mood="dusk">黃昏</button>
+      <button data-mood="night">夜晚</button>
+    </div>
+    <p class="hint">自動會依你當地的時間切換。只影響你自己看到的畫面。</p>
     <h3>雲端存檔</h3>
     <p class="hint">進度會自動存在伺服器。在別的裝置輸入你的存檔碼,就能接著玩。存檔碼等同密碼,請不要給別人。</p>
     <div class="row">

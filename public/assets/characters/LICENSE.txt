@@ -1,5 +1,0 @@
-Ultimate Animated Character Pack by Quaternius (https://quaternius.com)
-License: CC0 1.0 Universal (public domain)
-http://creativecommons.org/publicdomain/zero/1.0/
-
-GLB conversions obtained from https://github.com/Yametech12/ghostname-3d-assets

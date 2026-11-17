@@ -1,0 +1,10 @@
+VRoid Studio sample avatars (beta-era sample models), published by pixiv Inc.
+Files: Sendagaya_Shino.vrm, Sendagaya_Shibu.vrm, Vita.vrm, Sakurada_Fumiriya.vrm, Vivi.vrm, Victoria_Rubin.vrm
+
+License: CC0 1.0 Universal (each file's embedded VRM metadata states licenseName "CC0").
+Conditions of use: https://vroid.pixiv.help/hc/en-us/articles/4402614652569
+About CC0: https://creativecommons.org/publicdomain/zero/1.0/
+
+The files here were obtained from a public mirror (github.com/madjin/vrm-samples) and modified:
+embedded textures were downscaled and re-encoded as WebP to reduce download size. Geometry,
+bones and expressions are unchanged.

@@ -34,7 +34,7 @@ const CATALOG = {
   cat:       { name: '貓咪',     w: 1, h: 1, kind: 'floor' },
 };
 const AVATAR_RANGES = { skin: 5, hair: 6, hairColor: 7, shirt: 8, acc: 5 };
-const POSES = 2; // 專注姿勢:0 坐著、1 站著
+const POSES = 4; // 專注姿勢:0 打字、1 站著、2 看書、3 寫字
 const MAX_FOCUS_MIN = 180, MAX_TODOS = 30, MAX_HABITS = 8, KEEP_DAYS = 70;
 const PARTY_COUNTDOWN = 20000; // 共同專注發起後,等大家加入的時間
 const THEME_COUNT = 6;
@@ -76,40 +76,51 @@ const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const cleanText = (s, max) =>
   String(s ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, max);
 
-function canPlace(items, type, x, y, ignoreId) {
+// 家具可轉 90 度(r = 0–3);轉成橫向時佔地的寬與深對調。牆面掛飾不能轉
+const rotOf = (r) => (Number.isInteger(r) ? ((r % 4) + 4) % 4 : 0);
+const dims = (type, r) => { const d = CATALOG[type]; return d.kind !== 'wall' && rotOf(r) % 2 ? [d.h, d.w] : [d.w, d.h]; };
+function canPlace(items, type, x, y, r, ignoreId) {
   const d = CATALOG[type];
   if (!d || !Number.isInteger(x) || !Number.isInteger(y)) return false;
-  if (x < 0 || x + d.w > COLS) return false;
+  const [w, h] = dims(type, r);
+  if (x < 0 || x + w > COLS) return false;
   if (d.kind === 'wall') { if (y !== 0) return false; }
-  else if (y < 0 || y + d.h > ROWS) return false;
+  else if (y < 0 || y + h > ROWS) return false;
   return !items.some((it) => {
     if (it.id === ignoreId) return false;
     const o = CATALOG[it.type];
     if (!o || o.kind !== d.kind) return false;
-    return x < it.x + o.w && it.x < x + d.w && y < it.y + o.h && it.y < y + d.h;
+    const [ow, oh] = dims(it.type, it.r);
+    return x < it.x + ow && it.x < x + w && y < it.y + oh && it.y < y + h;
   });
 }
+
+// 成品房間:一鍵套用整套擺設(wall / floor 是牆面與地板的樣式編號)
+const PRESETS = {
+  study: { name: '書房', wall: 0, floor: 0, items: [
+    ['desk', 3, 2], ['chair', 4, 1], ['plant', 0, 0], ['lamp', 2, 1], ['bookshelf', 6, 0], ['plant', 7, 5],
+    ['rug', 3, 3], ['window', 3, 0], ['painting', 1, 0], ['shelf', 6, 0], ['plant', 0, 5],
+  ] },
+  bedroom: { name: '臥室', wall: 2, floor: 2, items: [
+    ['bed', 0, 0], ['cabinet', 1, 0], ['desk', 4, 2], ['chair', 5, 1], ['lamp', 3, 1], ['bookshelf', 6, 0],
+    ['rug2', 1, 3], ['armchair', 0, 4, 1], ['plant', 7, 5], ['tree', 3, 0],
+    ['window', 4, 0], ['painting', 2, 0], ['clock', 7, 0],
+  ] },
+  lounge: { name: '客廳', wall: 4, floor: 1, items: [
+    ['sofa', 0, 2, 1], ['table', 2, 3], ['tv', 6, 3, 3], ['rug', 2, 2], ['desk', 3, 1], ['chair', 4, 0],
+    ['bookshelf', 0, 0], ['lamp', 0, 4], ['plant', 7, 0], ['tree', 7, 5], ['cat', 3, 4], ['stool', 2, 0],
+    ['window', 3, 0], ['shelf', 0, 0], ['painting', 6, 0],
+  ] },
+};
+const presetItems = (key) => PRESETS[key].items.map(([type, x, y, r], i) => ({ id: i + 1, type, x, y, ...(r ? { r } : {}) }));
 
 function newRoom(ownerKey) {
   let code;
   do { code = randCode(6); } while (rooms[code]);
   rooms[code] = {
-    code, ownerKey, wall: 0, floor: 0, guestsEdit: false, nextId: 12,
-    // 新房間附一組基本佈置(之後可自由移動或收回)
-    // 椅子在書桌後面、面向房間,窗戶在背後
-    items: [
-      { id: 1, type: 'desk', x: 3, y: 2 },
-      { id: 2, type: 'chair', x: 4, y: 1 },
-      { id: 3, type: 'plant', x: 0, y: 0 },
-      { id: 4, type: 'lamp', x: 2, y: 1 },
-      { id: 5, type: 'bookshelf', x: 6, y: 0 },
-      { id: 6, type: 'plant', x: 7, y: 5 },
-      { id: 7, type: 'rug', x: 3, y: 3 },
-      { id: 8, type: 'window', x: 3, y: 0 },
-      { id: 9, type: 'painting', x: 1, y: 0 },
-      { id: 11, type: 'shelf', x: 6, y: 0 },
-      { id: 10, type: 'plant', x: 0, y: 5 },
-    ],
+    code, ownerKey, wall: 0, floor: 0, guestsEdit: false,
+    // 新房間附一組基本佈置(之後可自由移動、收回,或換成別的成品房間)
+    items: presetItems('study'), nextId: PRESETS.study.items.length + 1,
   };
   markDirty();
   return rooms[code];
@@ -121,7 +132,7 @@ function getProfile(key) {
     p = profiles[key] = {
       pid: randCode(8),
       name: '旅人' + Math.floor(1000 + Math.random() * 9000),
-      avatar: { skin: 0, hair: Math.floor(Math.random() * 5), hairColor: Math.floor(Math.random() * 7), shirt: Math.floor(Math.random() * 8), acc: 0 },
+      avatar: { skin: 0, hair: Math.floor(Math.random() * 6), hairColor: 0, shirt: 0, acc: 0 },
       totalMinutes: 0, sessions: 0, focus: null, room: null, status: '', pose: 0, todos: [],
     };
     markDirty();
@@ -280,6 +291,7 @@ const handlers = {
       room: { ...roomView(room), mine: room.ownerKey === c.key, ownerName: profiles[room.ownerKey]?.name || '' },
       players: [...set].map(pub).concat(pub(c)),
       catalog: CATALOG, cols: COLS, rows: ROWS, emotes: EMOTES, notice,
+      presets: Object.entries(PRESETS).map(([key, p]) => ({ key, name: p.name })),
     });
     if (reward) send(c, { t: 'focus_done', ...reward, offline: true });
     if (parties.has(room.code)) send(c, { t: 'party', party: partyView(parties.get(room.code), c) });
@@ -394,20 +406,34 @@ const handlers = {
   place(c, m) {
     const room = editable(c);
     if (!room) return;
-    const d = CATALOG[m.type];
+    const d = CATALOG[m.type], r = rotOf(m.r);
     if (!d) return;
     if (room.items.length >= MAX_ITEMS) return send(c, { t: 'toast', text: '房間放不下更多東西了' });
-    if (!canPlace(room.items, m.type, m.x, m.y)) return;
-    room.items.push({ id: room.nextId++, type: m.type, x: m.x, y: m.y });
+    if (!canPlace(room.items, m.type, m.x, m.y, r)) return;
+    room.items.push({ id: room.nextId++, type: m.type, x: m.x, y: m.y, ...(r && d.kind !== 'wall' ? { r } : {}) });
     roomChanged(room);
   },
 
   move_item(c, m) {
     const room = editable(c);
     const it = room?.items.find((i) => i.id === m.id);
-    if (!it || !canPlace(room.items, it.type, m.x, m.y, it.id)) return;
+    if (!it) return;
+    const r = m.r === undefined ? rotOf(it.r) : rotOf(m.r);
+    if (!canPlace(room.items, it.type, m.x, m.y, r, it.id)) return;
     it.x = m.x; it.y = m.y;
+    if (r && CATALOG[it.type].kind !== 'wall') it.r = r; else delete it.r;
     roomChanged(room);
+  },
+
+  // 套用成品房間(只有房主可以,會取代目前的擺設)
+  preset(c, m) {
+    const room = rooms[c.room];
+    if (!room || room.ownerKey !== c.key || !Object.hasOwn(PRESETS, m.key)) return;
+    const p = PRESETS[m.key];
+    room.items = presetItems(m.key); room.nextId = p.items.length + 1;
+    room.wall = p.wall; room.floor = p.floor;
+    roomChanged(room);
+    send(c, { t: 'toast', text: `已換成「${p.name}」` });
   },
 
   remove_item(c, m) {
@@ -480,10 +506,11 @@ const server = http.createServer((req, res) => {
   if (v) { hit = [null, 'text/javascript; charset=utf-8']; file = path.join(THREE_DIR, 'build', v[1]); }
   const ad = /^\/vendor\/addons\/((?:[\w-]+\/)*[\w-]+\.js)$/.exec(url);
   if (ad) { hit = [null, 'text/javascript; charset=utf-8']; file = path.join(THREE_DIR, 'examples/jsm', ad[1]); }
-  // 家具與角色模型(KayKit、Quaternius,皆為 CC0)
-  const as = /^\/assets\/(kaykit|characters|extra)\/((?:textures\/)?[\w-]+\.(gltf|glb|bin|png|jpg|txt))$/.exec(url);
+  if (url === '/vendor/three-vrm.js') { hit = [null, 'text/javascript; charset=utf-8']; file = path.join(__dirname, 'node_modules/@pixiv/three-vrm/lib/three-vrm.module.min.js'); }
+  // 家具與角色模型(KayKit、VRoid 範例角色等,皆為 CC0)
+  const as = /^\/assets\/(kaykit|avatars|extra)\/((?:textures\/)?[\w-]+\.(gltf|glb|vrm|bin|png|jpg|txt))$/.exec(url);
   if (as) {
-    const types = { gltf: 'model/gltf+json', glb: 'model/gltf-binary', bin: 'application/octet-stream', png: 'image/png', jpg: 'image/jpeg', txt: 'text/plain; charset=utf-8' };
+    const types = { gltf: 'model/gltf+json', glb: 'model/gltf-binary', vrm: 'application/octet-stream', bin: 'application/octet-stream', png: 'image/png', jpg: 'image/jpeg', txt: 'text/plain; charset=utf-8' };
     hit = [null, types[as[3]]]; file = path.join(__dirname, 'public/assets', as[1], as[2]);
   }
   if (!hit) return res.writeHead(404).end('Not found');
