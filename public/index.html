@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>悠悠自習室</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>🌙 悠悠自習室</h1>
+  <div class="chips">
+    <span class="chip" id="roomChip">房號 <b id="roomCode">------</b></span>
+    <button class="chip btn" id="copyLink">🔗 複製邀請連結</button>
+    <button class="chip btn" id="goHome" hidden>🏠 回我的房間</button>
+    <span class="chip">👥 <b id="online">0</b></span>
+    <span class="chip coin">🪙 <b id="coins">0</b></span>
+  </div>
+</header>
+
+<main>
+  <section class="stage">
+    <canvas id="game" width="720" height="560"></canvas>
+    <div id="editBar" hidden>
+      <span id="editHint"></span>
+      <button id="editRemove" hidden>收回這件</button>
+      <button id="editCancel">取消</button>
+    </div>
+    <div id="overlay" hidden><div id="overlayText">連線中…</div></div>
+  </section>
+
+  <aside>
+    <nav id="tabs">
+      <button data-tab="focus" class="on">⏱ 專注</button>
+      <button data-tab="chat">💬 聊天</button>
+      <button data-tab="decor">🪑 佈置</button>
+      <button data-tab="avatar">🧑 角色</button>
+      <button data-tab="settings">⚙ 設定</button>
+    </nav>
+
+    <div class="tab on" id="tab-focus">
+      <div id="timerBox">
+        <div id="timerLabel">準備好就開始吧</div>
+        <div id="timerText">25:00</div>
+        <div id="presets">
+          <button data-min="15">15</button>
+          <button data-min="25" class="on">25</button>
+          <button data-min="45">45</button>
+          <button data-min="60">60</button>
+          <input id="customMin" type="number" min="1" max="180" placeholder="自訂" aria-label="自訂分鐘">
+        </div>
+        <button id="focusBtn" class="primary">開始專注</button>
+        <p class="hint">每專注 1 分鐘可獲得 1 🪙,中途放棄不會有獎勵。</p>
+      </div>
+      <div class="stats">
+        <div><b id="statMin">0</b><span>累計分鐘</span></div>
+        <div><b id="statSes">0</b><span>完成次數</span></div>
+      </div>
+      <h3>房間成員</h3>
+      <ul id="members"></ul>
+    </div>
+
+    <div class="tab" id="tab-chat">
+      <div id="chatLog"></div>
+      <div id="emotes"></div>
+      <form id="chatForm">
+        <input id="chatInput" maxlength="200" placeholder="說點什麼…" autocomplete="off">
+        <button class="primary">送出</button>
+      </form>
+    </div>
+
+    <div class="tab" id="tab-decor">
+      <p class="hint" id="decorHint"></p>
+      <div id="decorBody">
+        <h3>家具</h3>
+        <div id="catalog"></div>
+        <h3>牆面</h3>
+        <div class="swatches" id="wallSwatches"></div>
+        <h3>地板</h3>
+        <div class="swatches" id="floorSwatches"></div>
+        <label id="guestsEditRow" class="check" hidden>
+          <input type="checkbox" id="guestsEdit"> 讓來訪的朋友一起佈置
+        </label>
+      </div>
+    </div>
+
+    <div class="tab" id="tab-avatar">
+      <canvas id="avatarPreview" width="160" height="150"></canvas>
+      <label class="field">暱稱 <input id="nameInput" maxlength="16"></label>
+      <div id="avatarOptions"></div>
+    </div>
+
+    <div class="tab" id="tab-settings">
+      <h3>環境音</h3>
+      <div id="sounds"></div>
+      <h3>雲端存檔</h3>
+      <p class="hint">進度會自動存在伺服器。在別的裝置輸入你的存檔碼,就能接著玩。存檔碼等同密碼,請不要給別人。</p>
+      <div class="row">
+        <input id="saveCode" readonly type="password" aria-label="我的存檔碼">
+        <button id="showCode">顯示</button>
+        <button id="copyCode">複製</button>
+      </div>
+      <div class="row">
+        <input id="restoreInput" placeholder="貼上存檔碼" autocomplete="off">
+        <button id="restoreBtn">載入存檔</button>
+      </div>
+      <h3>拜訪朋友</h3>
+      <div class="row">
+        <input id="joinInput" placeholder="輸入房號" maxlength="6" autocomplete="off">
+        <button id="joinBtn">前往</button>
+      </div>
+    </div>
+  </aside>
+</main>
+<div id="toasts"></div>
+<script src="game.js"></script>
+</body>
+</html>
