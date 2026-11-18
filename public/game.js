@@ -968,9 +968,22 @@ const myPos = () => { const p = players.get(me); return p ? new THREE.Vector3(p.
 const VIEWS = {
   room: { yaw: 50, pitch: 20, dist: () => 20, target: () => new THREE.Vector3(COLS * 0.4, 1.0, ROWS * 0.36) },
   // 坐著時從正前方看;站著時人靠近房門那側,改從側邊看才退得夠遠
-  desk: { yaw: () => (players.get(me)?.seat ? 20 : 64), pitch: 8, dist: () => 3.3, target: () => myPos().add(new THREE.Vector3(0, 1.08, 0.15)) },
+  desk: { yaw: () => (players.get(me)?.seat ? 20 : roomiestYaw(myPos().add(new THREE.Vector3(0, 1.08, 0.15)), [20, 64, -64, 110, -110, 150, -150], 8, 2.3)), pitch: 8, dist: () => 3.3, target: () => myPos().add(new THREE.Vector3(0, 1.08, 0.15)) },
   side: { yaw: 66, pitch: 12, dist: () => 3.8, target: () => myPos().add(new THREE.Vector3(-0.2, 1.0, 0)) },
 };
+// 從目標點往某個方向最多能退多遠(不穿牆);站著時挑退得夠遠的那一側來看角色
+function roomAlong(T, yawDeg, pitchDeg) {
+  const cp = Math.cos(pitchDeg * D2R), v = [Math.sin(yawDeg * D2R) * cp, Math.sin(pitchDeg * D2R), Math.cos(yawDeg * D2R) * cp];
+  const m = 0.28, lims = [[T.x, v[0], m, COLS - m], [T.y, v[1], 0.25, WALLH - 0.2], [T.z, v[2], m, ROWS - m]];
+  let d = 99;
+  for (const [p, q, lo, hi] of lims) { if (q > 1e-4) d = Math.min(d, (hi - p) / q); else if (q < -1e-4) d = Math.min(d, (lo - p) / q); }
+  return d;
+}
+function roomiestYaw(T, yaws, pitch, want) {
+  let best = yaws[0], bd = -1;
+  for (const y of yaws) { const d = roomAlong(T, y, pitch); if (d >= want) return y; if (d > bd) { bd = d; best = y; } }
+  return best;
+}
 const AUTO = ['desk', 'room', 'side'];
 function applyView(name) {
   activeView = name;
@@ -1137,7 +1150,7 @@ function frame(t) {
     }
     const f = p.focus && (p.focus.mode === 'up' || p.focus.endAt > t) ? p.focus : null;
     const sitting = !!f && f.phase === 'focus' && p.pose !== 1 && !walking;
-    const want = walking ? Math.atan2(dx, dy) : sitting && p.seat ? p.seat.face : 0.35;
+    const want = walking ? Math.atan2(dx, dy) : sitting && p.seat ? p.seat.face : p.id === me && activeView === 'desk' ? camGoal.yaw : 0.35; // 桌前視角下,站著時轉向鏡頭
     let diff = want - p.obj.rotation.y;
     diff = Math.atan2(Math.sin(diff), Math.cos(diff));
     p.obj.rotation.y += diff * Math.min(1, dt * 12);
@@ -1757,26 +1770,6 @@ const SOUNDS = {
     src.connect(lp).connect(out); src.start();
     return () => src.stop();
   } },
-  music: { name: '輕音樂', make(out) {
-    const lp = ac.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 1100; lp.connect(out);
-    const chords = [[220, 261.6, 329.6, 392], [174.6, 220, 261.6, 329.6], [196, 246.9, 293.7, 370], [164.8, 207.7, 246.9, 311.1]];
-    const penta = [440, 523.3, 587.3, 659.3, 784];
-    let i = 0, next = ac.currentTime + .1;
-    const tone = (f, at, dur, vol, type) => {
-      const o = ac.createOscillator(), g = ac.createGain();
-      o.type = type; o.frequency.value = f;
-      g.gain.setValueAtTime(0, at); g.gain.linearRampToValueAtTime(vol, at + Math.min(.6, dur / 3)); g.gain.exponentialRampToValueAtTime(.0001, at + dur);
-      o.connect(g).connect(lp); o.start(at); o.stop(at + dur + .05);
-    };
-    const id = setInterval(() => {
-      while (next < ac.currentTime + 1) {
-        chords[i++ % chords.length].forEach((f) => tone(f, next, 4.2, .09, 'triangle'));
-        for (let k = 0; k < 4; k++) if (Math.random() < .6) tone(penta[Math.floor(Math.random() * penta.length)], next + k + Math.random() * .2, 1.4, .06, 'sine');
-        next += 4;
-      }
-    }, 300);
-    return () => clearInterval(id);
-  } },
 };
 function noise(brown) {
   const buf = ac.createBuffer(1, ac.sampleRate * 3, ac.sampleRate), d = buf.getChannelData(0);
@@ -1803,6 +1796,63 @@ $('#sounds').replaceChildren(...Object.entries(SOUNDS).map(([key, s]) => {
   vol.oninput = () => { if (gain) gain.gain.value = vol.value / 100; };
   return el('div', { className: 'sound' }, btn, vol);
 }));
+// ---------- 音樂播放器:HoliznaCC0 的 lo-fi 曲目(CC0),每個人各自播放 ----------
+const TRACKS = [
+  ['first-snow', 'First Snow', 'Winter Lofi', 174], ['snow-drift', 'Snow Drift', 'Winter Lofi', 174], ['fire-place', 'Fire Place', 'Winter Lofi', 170],
+  ['tokyo-sunset', 'Tokyo Sunset', 'Public Domain Lofi', 139], ['calm-currents', 'Calm Currents', 'Public Domain Lofi', 148], ['still-life', 'Still Life', 'Public Domain Lofi', 135],
+  ['peaceful-drift', 'Peaceful Drift', 'Public Domain Lofi', 128], ['ease-into-night', 'Ease into Night', 'Public Domain Lofi', 152],
+  ['roof-tops', 'Roof Tops', 'Summer Air', 214], ['faded-in-the-sunlight', 'Faded in the Sunlight', 'Summer Air', 178],
+].map(([f, t, al, sec]) => ({ f, t, al, sec }));
+const audio = new Audio();
+audio.preload = 'none';
+let trackIdx = Math.min(TRACKS.length - 1, Math.max(0, +store.get('yoyo_track') || 0)), shuffle = store.get('yoyo_shuffle') === '1', seeking = false, loaded = -1;
+audio.volume = Math.min(1, Math.max(0, (+(store.get('yoyo_mvol') ?? 60)) / 100));
+$('#mVol').value = Math.round(audio.volume * 100);
+function refreshPlayer() {
+  const tr = TRACKS[trackIdx], on = !audio.paused;
+  $('#npTitle').textContent = loaded < 0 ? '選一首開始播放' : tr.t;
+  $('#npSub').textContent = loaded < 0 ? `lo-fi 音樂 · ${TRACKS.length} 首` : `HoliznaCC0 · ${tr.al}`;
+  $('#musicNow').textContent = on ? `♪ ${tr.t}` : '';
+  $('#musicCard').classList.toggle('playing', on); // 收起來時,膠囊上顯示正在播的歌
+  $('#mPlayIcon').setAttribute('d', on ? 'M6 4h4v16H6zM14 4h4v16h-4z' : 'M7 4l13 8-13 8z');
+  $('#mPlay').ariaLabel = on ? '暫停' : '播放';
+  $('#mShuffle').setAttribute('aria-pressed', String(shuffle));
+  document.querySelectorAll('#trackList li').forEach((li, i) => li.classList.toggle('on', loaded >= 0 && i === trackIdx));
+}
+function playTrack(i) {
+  trackIdx = ((i % TRACKS.length) + TRACKS.length) % TRACKS.length;
+  store.set('yoyo_track', trackIdx);
+  if (loaded !== trackIdx) { audio.src = `/assets/music/${TRACKS[trackIdx].f}.mp3`; loaded = trackIdx; $('#mSeek').value = 0; }
+  audio.play().catch(() => toast('這首歌暫時無法播放,請再按一次播放'));
+  if ('mediaSession' in navigator) navigator.mediaSession.metadata = new MediaMetadata({ title: TRACKS[trackIdx].t, artist: 'HoliznaCC0', album: TRACKS[trackIdx].al });
+  refreshPlayer();
+}
+const nextTrack = () => playTrack(shuffle && TRACKS.length > 1 ? (trackIdx + 1 + Math.floor(Math.random() * (TRACKS.length - 1))) % TRACKS.length : trackIdx + 1);
+const prevTrack = () => (audio.currentTime > 4 ? ((audio.currentTime = 0), audio.play()) : playTrack(trackIdx - 1));
+const togglePlay = () => (loaded < 0 || audio.paused ? playTrack(trackIdx) : audio.pause());
+$('#trackList').replaceChildren(...TRACKS.map((tr, i) => {
+  const li = el('li', { tabIndex: 0, role: 'button' }, el('span', { textContent: tr.t }), el('span', { textContent: mmss(tr.sec) }));
+  li.onclick = () => playTrack(i);
+  li.onkeydown = (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); playTrack(i); } };
+  return li;
+}));
+$('#mPlay').addEventListener('click', togglePlay);
+$('#mNext').addEventListener('click', nextTrack);
+$('#mPrev').addEventListener('click', prevTrack);
+$('#mShuffle').addEventListener('click', () => { shuffle = !shuffle; store.set('yoyo_shuffle', shuffle ? '1' : '0'); refreshPlayer(); });
+$('#mVol').addEventListener('input', (ev) => { audio.volume = ev.target.value / 100; store.set('yoyo_mvol', ev.target.value); });
+$('#mSeek').addEventListener('input', () => { seeking = true; });
+$('#mSeek').addEventListener('change', (ev) => { if (audio.duration) audio.currentTime = (ev.target.value / 1000) * audio.duration; seeking = false; });
+audio.addEventListener('timeupdate', () => { if (!seeking && audio.duration) $('#mSeek').value = Math.round((audio.currentTime / audio.duration) * 1000); });
+audio.addEventListener('ended', nextTrack);
+for (const ev of ['play', 'pause']) audio.addEventListener(ev, refreshPlayer);
+audio.addEventListener('error', () => { if (loaded >= 0) toast('音樂載入失敗,請檢查網路'); });
+if ('mediaSession' in navigator) {
+  navigator.mediaSession.setActionHandler('play', togglePlay); navigator.mediaSession.setActionHandler('pause', togglePlay);
+  navigator.mediaSession.setActionHandler('nexttrack', nextTrack); navigator.mediaSession.setActionHandler('previoustrack', prevTrack);
+}
+refreshPlayer();
+
 function chime() {
   try {
     ac = ac || new AudioContext(); ac.resume();

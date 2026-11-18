@@ -18,7 +18,8 @@
 - **日夜光線**:白天、黃昏、夜晚,預設依你當地時間自動切換
 - **表情與聊天**:表情符號為主,另有文字對話
 - **雲端存檔**:進度存在伺服器,用「存檔碼」可在其他裝置接續
-- **環境音**:雨聲、白噪音、輕音樂(瀏覽器即時合成,不需音檔)
+- **音樂播放**:10 首 lo-fi 曲目,有播放/暫停、上下一首、隨機、進度與音量;每個人各自播放,不會互相影響
+- **環境音**:雨聲、白噪音(瀏覽器即時合成),可以和音樂疊在一起
 
 ## 執行
 
@@ -60,6 +61,7 @@ public/game.js     3D 場景(three.js)、連線、計時、佈置、聊天、環
 - 角色模型:VRoid Studio 範例角色(pixiv 發布,CC0),共 6 個。檔案在 `public/assets/avatars/`,貼圖經過縮小;動作是程式即時擺出來的,沒有使用動作檔。顯示用 `@pixiv/three-vrm`(MIT)。
 - 窗戶、電視與電視櫃:Furniture Kit 2.0(作者 Kenney,kenney.nl),CC0。
 - 家具(第二批):Furniture Kit 2.0 與 Mini Arcade 1.2(作者 Kenney,kenney.nl),CC0。檔案在 `public/assets/kenney/`,授權原文在同一個資料夾的 `LICENSE.txt`。
+- 音樂:HoliznaCC0 的 lo-fi 曲目(Winter Lofi、Public Domain Lofi、Summer Air 三張專輯共 10 首),CC0。檔案在 `public/assets/music/`,經過重新壓縮;曲目清單在同資料夾的 `LICENSE.txt`。
 - 貓咪:Quaternius 的動物模型,CC0。
 - 時鐘:Poly Haven 的「Wall Clock」(作者 PierreB3D),CC0。以上幾項在 `public/assets/extra/`。
 - 各資料夾內有 `LICENSE.txt`。

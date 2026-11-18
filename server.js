@@ -590,15 +590,28 @@ const server = http.createServer((req, res) => {
   if (ad) { hit = [null, 'text/javascript; charset=utf-8']; file = path.join(THREE_DIR, 'examples/jsm', ad[1]); }
   if (url === '/vendor/three-vrm.js') { hit = [null, 'text/javascript; charset=utf-8']; file = path.join(__dirname, 'node_modules/@pixiv/three-vrm/lib/three-vrm.module.min.js'); }
   // 家具與角色模型(KayKit、VRoid 範例角色等,皆為 CC0)
-  const as = /^\/assets\/(kaykit|kenney|avatars|extra)\/((?:[Tt]extures\/)?[\w-]+\.(gltf|glb|vrm|bin|png|jpg|txt))$/.exec(url);
+  const as = /^\/assets\/(kaykit|kenney|avatars|extra|music)\/((?:[Tt]extures\/)?[\w-]+\.(gltf|glb|vrm|bin|png|jpg|txt|mp3))$/.exec(url);
   if (as) {
-    const types = { gltf: 'model/gltf+json', glb: 'model/gltf-binary', vrm: 'application/octet-stream', bin: 'application/octet-stream', png: 'image/png', jpg: 'image/jpeg', txt: 'text/plain; charset=utf-8' };
+    const types = { gltf: 'model/gltf+json', glb: 'model/gltf-binary', vrm: 'application/octet-stream', bin: 'application/octet-stream', png: 'image/png', jpg: 'image/jpeg', txt: 'text/plain; charset=utf-8', mp3: 'audio/mpeg' };
     hit = [null, types[as[3]]]; file = path.join(__dirname, 'public/assets', as[1], as[2]);
   }
   if (!hit) return res.writeHead(404).end('Not found');
   // 模型與 three.js 內容不常變動,讓瀏覽器快取一天;文字類檔案用 gzip 壓縮後再送
   const full = file || path.join(__dirname, 'public', hit[0]);
   const headers = { 'Content-Type': hit[1], 'Cache-Control': file ? 'public, max-age=86400' : 'no-cache' };
+  // 音樂:支援分段讀取(Range)。Safari 和 iOS 沒有這個就不肯播放,也才能拖曳進度
+  if (hit[1] === 'audio/mpeg') {
+    return fs.stat(full, (err, st) => {
+      if (err) return res.writeHead(404).end('Not found');
+      const base = { ...headers, 'Accept-Ranges': 'bytes' };
+      const m = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range || '');
+      if (!m || (!m[1] && !m[2])) { res.writeHead(200, { ...base, 'Content-Length': st.size }); return fs.createReadStream(full).pipe(res); }
+      let start = m[1] ? +m[1] : Math.max(0, st.size - +m[2]), end = m[1] && m[2] ? Math.min(+m[2], st.size - 1) : st.size - 1;
+      if (start > end || start >= st.size) return res.writeHead(416, { 'Content-Range': `bytes */${st.size}` }).end();
+      res.writeHead(206, { ...base, 'Content-Range': `bytes ${start}-${end}/${st.size}`, 'Content-Length': end - start + 1 });
+      fs.createReadStream(full, { start, end }).pipe(res);
+    });
+  }
   const gz = /gzip/.test(req.headers['accept-encoding'] || '') && /javascript|html|css|json|octet-stream|plain/.test(hit[1]);
   if (gz && GZ.has(full)) return res.writeHead(200, { ...headers, 'Content-Encoding': 'gzip', Vary: 'Accept-Encoding' }).end(GZ.get(full));
   fs.readFile(full, (err, buf) => {

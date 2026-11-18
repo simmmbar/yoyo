@@ -83,7 +83,21 @@
   </section>
 
   <section class="card" id="musicCard">
-    <button class="cardTog" aria-label="收合或展開環境音"><span class="ttl">環境音</span><i></i></button>
+    <button class="cardTog" aria-label="收合或展開音樂與環境音"><span class="ttl" id="musicTtl">音樂與環境音</span><span class="ttl now" id="musicNow"></span><i></i></button>
+    <div id="player">
+      <div id="npTitle">選一首開始播放</div>
+      <div id="npSub">lo-fi 音樂 · 10 首</div>
+      <input id="mSeek" type="range" min="0" max="1000" value="0" aria-label="播放進度">
+      <div class="mctl">
+        <button id="mShuffle" title="隨機播放" aria-label="隨機播放" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M3 7h4l10 10h4M3 17h4l3-3M14 10l3-3h4M18 4l3 3-3 3M18 14l3 3-3 3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <button id="mPrev" aria-label="上一首"><svg viewBox="0 0 24 24"><path d="M6 5v14M20 5 9 12l11 7z" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/></svg></button>
+        <button id="mPlay" class="primary" aria-label="播放"><svg viewBox="0 0 24 24"><path id="mPlayIcon" d="M7 4l13 8-13 8z" fill="currentColor"/></svg></button>
+        <button id="mNext" aria-label="下一首"><svg viewBox="0 0 24 24"><path d="M18 5v14M4 5l11 7-11 7z" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/></svg></button>
+        <input id="mVol" type="range" min="0" max="100" value="60" aria-label="音樂音量">
+      </div>
+      <ul id="trackList"></ul>
+    </div>
+    <div class="subHead">環境音</div>
     <div id="sounds"></div>
   </section>
 </div>

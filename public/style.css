@@ -322,6 +322,30 @@ body.focusing #timerSetup, body.focusing #modes, body.focusing #poses { display:
 .catTabs button { border-radius: 999px; padding: 3px 10px; font-size: 12px; color: var(--muted); }
 .catTabs button.on { background: var(--accent); color: var(--accent-ink); border-color: transparent; font-weight: 700; }
 
+/* 音樂播放器 */
+#musicNow { display: none; letter-spacing: .04em; color: var(--accent); max-width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#musicCard.min.playing #musicTtl { display: none; }
+#musicCard.min.playing #musicNow { display: inline; }
+#npTitle { font-size: 14px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#npSub { font-size: 11px; color: var(--muted); margin-top: -6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#mSeek, #mVol { padding: 0; accent-color: var(--accent); min-width: 0; }
+#mSeek { width: 100%; }
+.mctl { display: flex; align-items: center; gap: 6px; }
+.mctl button { width: 32px; height: 32px; padding: 0; border-radius: 50%; display: grid; place-items: center; flex: none; }
+.mctl button svg { width: 16px; height: 16px; }
+.mctl #mPlay { width: 38px; height: 38px; }
+.mctl #mPlay svg { width: 18px; height: 18px; }
+.mctl #mShuffle[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+.mctl #mVol { flex: 1; }
+#trackList { list-style: none; margin: 0; padding: 0; max-height: 132px; overflow-y: auto; }
+#trackList li { display: flex; justify-content: space-between; gap: 8px; padding: 3px 6px; font-size: 13px; border-radius: 8px; cursor: pointer; }
+#trackList li:hover { background: var(--glass2); }
+#trackList li.on { color: var(--accent); font-weight: 700; }
+#trackList li span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#trackList li span:last-child { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; flex: none; font-weight: 400; }
+#player { display: flex; flex-direction: column; gap: 8px; }
+.subHead { font-size: 12px; color: var(--muted); font-weight: 600; letter-spacing: .12em; margin-top: 4px; }
+
 /* 可收合的小卡片 */
 .cardTog {
   display: flex; justify-content: space-between; align-items: center; gap: 10px; width: 100%;
@@ -331,9 +355,9 @@ body.focusing #timerSetup, body.focusing #modes, body.focusing #poses { display:
 .cardTog i { width: 8px; height: 8px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(-135deg); margin: 4px 4px 0 0; transition: transform .15s; }
 .card.min .cardTog i { transform: rotate(45deg); margin: 0 4px 4px 0; }
 .card.min { align-self: flex-start; padding: 8px 14px; border-radius: 999px; }
-.card.min > :not(.cardTog) { display: none; }
+.card.min > :not(.cardTog) { display: none !important; }
 #timerCard.min { border-radius: 20px; padding: 10px 14px; min-width: 150px; }
-#timerCard.min > #timerText, #timerCard.min > #focusBtn { display: block; }
+#timerCard.min > #timerText, #timerCard.min > #focusBtn { display: block !important; }
 #timerCard.min > #timerText { font-size: 38px; }
 #timerCard.min > #focusBtn { padding: 4px; font-size: 13px; }
 #timerCard.min .ttl::after { content: attr(data-x); }
