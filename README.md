@@ -60,6 +60,7 @@ public/game.js     3D 場景(three.js)、連線、計時、佈置、聊天、環
 - 家具模型:[KayKit Furniture Bits](https://github.com/KayKit-Game-Assets/KayKit-Furniture-Bits-1.0)(作者 Kay Lousberg,www.kaylousberg.com),CC0。檔案在 `public/assets/kaykit/`。
 - 角色模型:VRoid Studio 範例角色(pixiv 發布,CC0),共 6 個。檔案在 `public/assets/avatars/`,貼圖經過縮小;動作是程式即時擺出來的,沒有使用動作檔。顯示用 `@pixiv/three-vrm`(MIT)。
 - 窗戶、電視與電視櫃:Furniture Kit 2.0(作者 Kenney,kenney.nl),CC0。
+- 原創家具:工作桌、電腦椅、開放書櫃、檯燈、螢幕鍵盤這 5 件是本專案自己用 Blender 的 Python 介面做的,原始程式在 `tools/blender/furniture.py`(`pip install bpy` 後執行即可重新產生),輸出在 `public/assets/studio/`。遊戲裡用卡通打光加描邊顯示。
 - 家具(第二批):Furniture Kit 2.0 與 Mini Arcade 1.2(作者 Kenney,kenney.nl),CC0。檔案在 `public/assets/kenney/`,授權原文在同一個資料夾的 `LICENSE.txt`。
 - 音樂:HoliznaCC0 的 lo-fi 曲目(Winter Lofi、Public Domain Lofi、Summer Air 三張專輯共 10 首),CC0。檔案在 `public/assets/music/`,經過重新壓縮;曲目清單在同資料夾的 `LICENSE.txt`。
 - 貓咪:Quaternius 的動物模型,CC0。

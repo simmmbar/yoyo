@@ -590,7 +590,7 @@ const server = http.createServer((req, res) => {
   if (ad) { hit = [null, 'text/javascript; charset=utf-8']; file = path.join(THREE_DIR, 'examples/jsm', ad[1]); }
   if (url === '/vendor/three-vrm.js') { hit = [null, 'text/javascript; charset=utf-8']; file = path.join(__dirname, 'node_modules/@pixiv/three-vrm/lib/three-vrm.module.min.js'); }
   // 家具與角色模型(KayKit、VRoid 範例角色等,皆為 CC0)
-  const as = /^\/assets\/(kaykit|kenney|avatars|extra|music)\/((?:[Tt]extures\/)?[\w-]+\.(gltf|glb|vrm|bin|png|jpg|txt|mp3))$/.exec(url);
+  const as = /^\/assets\/(kaykit|kenney|studio|avatars|extra|music)\/((?:[Tt]extures\/)?[\w-]+\.(gltf|glb|vrm|bin|png|jpg|txt|mp3))$/.exec(url);
   if (as) {
     const types = { gltf: 'model/gltf+json', glb: 'model/gltf-binary', vrm: 'application/octet-stream', bin: 'application/octet-stream', png: 'image/png', jpg: 'image/jpeg', txt: 'text/plain; charset=utf-8', mp3: 'audio/mpeg' };
     hit = [null, types[as[3]]]; file = path.join(__dirname, 'public/assets', as[1], as[2]);
