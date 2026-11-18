@@ -12,7 +12,7 @@
 - **專注統計**:今天、本週、連續天數、累計,以及近 7 天/近 30 天的每日專注分鐘圖表(依你當地的日期計算)
 - **共同專注**:房主發起後,房間裡的人可以加入,大家同時開始、同時結束,完成後自動拍一張合照
 - **多人同房間**:每個人有自己的房間與 6 碼房號,分享邀請連結即可即時看到彼此(每房最多 12 人)
-- **房間佈置**:23 種家具(含電腦桌、海報、霓虹燈等牆面掛飾)全部直接可用,6 種牆面與地板;椅子會自動朝向旁邊的桌子;房主可開放朋友一起佈置
+- **房間佈置**:72 種家具分成八類(桌椅、收納、床與沙發、電器、植物燈飾、桌上小物、牆面、地毯),全部直接可用;小物可以放在桌面、矮櫃和床上;多數家具可換 8 種顏色(佈置時按 C),6 種牆面與地板;椅子會自動朝向旁邊的桌子;房主可開放朋友一起佈置
 - **角色自訂**:6 個動漫風角色,可換膚色、髮色、上衣顏色;會眨眼、看鏡頭,頭髮和衣服會擺動
 - **成品房間與旋轉**:書房、臥室、客廳三組現成擺設可一鍵套用;家具可旋轉(佈置時按 R)
 - **日夜光線**:白天、黃昏、夜晚,預設依你當地時間自動切換
@@ -59,6 +59,7 @@ public/game.js     3D 場景(three.js)、連線、計時、佈置、聊天、環
 - 家具模型:[KayKit Furniture Bits](https://github.com/KayKit-Game-Assets/KayKit-Furniture-Bits-1.0)(作者 Kay Lousberg,www.kaylousberg.com),CC0。檔案在 `public/assets/kaykit/`。
 - 角色模型:VRoid Studio 範例角色(pixiv 發布,CC0),共 6 個。檔案在 `public/assets/avatars/`,貼圖經過縮小;動作是程式即時擺出來的,沒有使用動作檔。顯示用 `@pixiv/three-vrm`(MIT)。
 - 窗戶、電視與電視櫃:Furniture Kit 2.0(作者 Kenney,kenney.nl),CC0。
+- 家具(第二批):Furniture Kit 2.0 與 Mini Arcade 1.2(作者 Kenney,kenney.nl),CC0。檔案在 `public/assets/kenney/`,授權原文在同一個資料夾的 `LICENSE.txt`。
 - 貓咪:Quaternius 的動物模型,CC0。
 - 時鐘:Poly Haven 的「Wall Clock」(作者 PierreB3D),CC0。以上幾項在 `public/assets/extra/`。
 - 各資料夾內有 `LICENSE.txt`。

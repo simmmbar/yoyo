@@ -8,39 +8,91 @@ const { WebSocketServer } = require('ws');
 
 const PORT = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
-const COLS = 6, ROWS = 5, MAX_ITEMS = 60, MAX_ROOM_PLAYERS = 12;
+const COLS = 6, ROWS = 5, MAX_ITEMS = 110, MAX_ROOM_PLAYERS = 12;
 
-// kind: floor(佔地板格) / rug(鋪在地上,可被踩與疊放) / wall(掛在牆上)
+// kind: floor(佔地板格) / rug(鋪在地上,可被踩與疊放) / wall(掛在牆上) / top(小物:放在桌面、櫃子上,或直接放地上)
+// g: 佈置面板的分類
 const CATALOG = {
-  pc:        { name: '電腦桌',   w: 2, h: 1, kind: 'floor' },
-  desk:      { name: '書桌',     w: 2, h: 1, kind: 'floor' },
-  chair:     { name: '椅子',     w: 1, h: 1, kind: 'floor' },
-  plant:     { name: '盆栽',     w: 1, h: 1, kind: 'floor' },
-  rug:       { name: '條紋地毯', w: 3, h: 2, kind: 'rug' },
-  clock:     { name: '時鐘',     w: 1, h: 1, kind: 'wall' },
-  lamp:      { name: '立燈',     w: 1, h: 1, kind: 'floor' },
-  rug2:      { name: '圓地毯',   w: 3, h: 2, kind: 'rug' },
-  stool:     { name: '小凳子',   w: 1, h: 1, kind: 'floor' },
-  window:    { name: '窗戶',     w: 2, h: 1, kind: 'wall' },
-  table:     { name: '小桌',     w: 1, h: 1, kind: 'floor' },
-  shelf:     { name: '壁掛書架', w: 2, h: 1, kind: 'wall' },
-  poster:    { name: '海報',     w: 1, h: 1, kind: 'wall' },
-  neon:      { name: '霓虹燈',   w: 1, h: 1, kind: 'wall' },
-  painting:  { name: '掛畫',     w: 1, h: 1, kind: 'wall' },
-  cabinet:   { name: '床頭櫃',   w: 1, h: 1, kind: 'floor' },
-  bookshelf: { name: '置物櫃',   w: 2, h: 1, kind: 'floor' },
-  tree:      { name: '仙人掌',   w: 1, h: 1, kind: 'floor' },
-  armchair:  { name: '單人沙發', w: 1, h: 1, kind: 'floor' },
-  sofa:      { name: '沙發',     w: 2, h: 1, kind: 'floor' },
-  bed:       { name: '床',       w: 1, h: 2, kind: 'floor' },
-  tv:        { name: '電視',     w: 1, h: 1, kind: 'floor' },
-  cat:       { name: '貓咪',     w: 1, h: 1, kind: 'floor' },
+  pc:        { name: '電腦桌',   w: 2, h: 1, g: 'desk', kind: 'floor' },
+  desk:      { name: '書桌',     w: 2, h: 1, g: 'desk', kind: 'floor' },
+  chair:     { name: '椅子',     w: 1, h: 1, g: 'desk', kind: 'floor' },
+  plant:     { name: '盆栽',     w: 1, h: 1, g: 'deco', kind: 'floor' },
+  rug:       { name: '條紋地毯', w: 3, h: 2, g: 'rug', kind: 'rug' },
+  clock:     { name: '時鐘',     w: 1, h: 1, g: 'wall', kind: 'wall' },
+  lamp:      { name: '立燈',     w: 1, h: 1, g: 'deco', kind: 'floor' },
+  rug2:      { name: '圓地毯',   w: 3, h: 2, g: 'rug', kind: 'rug' },
+  stool:     { name: '小凳子',   w: 1, h: 1, g: 'desk', kind: 'floor' },
+  window:    { name: '窗戶',     w: 2, h: 1, g: 'wall', kind: 'wall' },
+  table:     { name: '小桌',     w: 1, h: 1, g: 'desk', kind: 'floor' },
+  shelf:     { name: '壁掛書架', w: 2, h: 1, g: 'wall', kind: 'wall' },
+  poster:    { name: '海報',     w: 1, h: 1, g: 'wall', kind: 'wall' },
+  neon:      { name: '霓虹燈',   w: 1, h: 1, g: 'wall', kind: 'wall' },
+  painting:  { name: '掛畫',     w: 1, h: 1, g: 'wall', kind: 'wall' },
+  cabinet:   { name: '床頭櫃',   w: 1, h: 1, g: 'store', kind: 'floor' },
+  bookshelf: { name: '置物櫃',   w: 2, h: 1, g: 'store', kind: 'floor' },
+  tree:      { name: '仙人掌',   w: 1, h: 1, g: 'deco', kind: 'floor' },
+  armchair:  { name: '單人沙發', w: 1, h: 1, g: 'rest', kind: 'floor' },
+  sofa:      { name: '沙發',     w: 2, h: 1, g: 'rest', kind: 'floor' },
+  bed:       { name: '床',       w: 1, h: 2, g: 'rest', kind: 'floor' },
+  tv:        { name: '電視',     w: 1, h: 1, g: 'elec', kind: 'floor' },
+  cat:       { name: '貓咪',     w: 1, h: 1, g: 'deco', kind: 'floor' },
+  // ---- Kenney Furniture Kit / Mini Arcade(CC0),比例較修長 ----
+  kdesk:    { name: '工作桌',     w: 2, h: 1, g: 'desk', kind: 'floor' },
+  kchair:   { name: '電腦椅',     w: 1, h: 1, g: 'desk', kind: 'floor' },
+  cchair:   { name: '軟墊椅',     w: 1, h: 1, g: 'desk', kind: 'floor' },
+  mchair:   { name: '鐵腳椅',     w: 1, h: 1, g: 'desk', kind: 'floor' },
+  barstool: { name: '高腳凳',     w: 1, h: 1, g: 'desk', kind: 'floor' },
+  dining:   { name: '長桌',       w: 2, h: 1, g: 'desk', kind: 'floor' },
+  coffee:   { name: '茶几',       w: 2, h: 1, g: 'desk', kind: 'floor' },
+  side:     { name: '邊桌',       w: 1, h: 1, g: 'desk', kind: 'floor' },
+  kcase:    { name: '開放書櫃',   w: 1, h: 1, g: 'store', kind: 'floor' },
+  doorcase: { name: '門片書櫃',   w: 1, h: 1, g: 'store', kind: 'floor' },
+  widecase: { name: '寬書櫃',     w: 2, h: 1, g: 'store', kind: 'floor' },
+  lowcase:  { name: '矮櫃',       w: 1, h: 1, g: 'store', kind: 'floor' },
+  rack:     { name: '衣帽架',     w: 1, h: 1, g: 'store', kind: 'floor' },
+  box:      { name: '紙箱',       w: 1, h: 1, g: 'store', kind: 'floor' },
+  dbed:     { name: '雙人床',     w: 2, h: 2, g: 'rest', kind: 'floor' },
+  bunk:     { name: '上下舖',     w: 1, h: 2, g: 'rest', kind: 'floor' },
+  ksofa:    { name: '布沙發',     w: 2, h: 1, g: 'rest', kind: 'floor' },
+  dsofa:    { name: '設計沙發',   w: 2, h: 1, g: 'rest', kind: 'floor' },
+  lchair:   { name: '休閒椅',     w: 1, h: 1, g: 'rest', kind: 'floor' },
+  ottoman:  { name: '腳凳',       w: 1, h: 1, g: 'rest', kind: 'floor' },
+  bench:    { name: '長椅',       w: 1, h: 1, g: 'rest', kind: 'floor' },
+  tv2:      { name: '液晶電視',   w: 2, h: 1, g: 'elec', kind: 'floor' },
+  fridge:   { name: '冰箱',       w: 1, h: 1, g: 'elec', kind: 'floor' },
+  spk:      { name: '落地喇叭',   w: 1, h: 1, g: 'elec', kind: 'floor' },
+  arcade:   { name: '大型電玩',   w: 1, h: 1, g: 'elec', kind: 'floor' },
+  vending:  { name: '販賣機',     w: 1, h: 1, g: 'elec', kind: 'floor' },
+  claw:     { name: '夾娃娃機',   w: 1, h: 1, g: 'elec', kind: 'floor' },
+  pinball:  { name: '彈珠台',     w: 1, h: 2, g: 'elec', kind: 'floor' },
+  flamp:    { name: '圓罩立燈',   w: 1, h: 1, g: 'deco', kind: 'floor' },
+  flamp2:   { name: '方罩立燈',   w: 1, h: 1, g: 'deco', kind: 'floor' },
+  bigplant: { name: '大盆栽',     w: 1, h: 1, g: 'deco', kind: 'floor' },
+  bin:      { name: '垃圾桶',     w: 1, h: 1, g: 'deco', kind: 'floor' },
+  monitor:  { name: '螢幕鍵盤',   w: 1, h: 1, g: 'top', kind: 'top' },
+  tlaptop:  { name: '筆電',       w: 1, h: 1, g: 'top', kind: 'top' },
+  tbooks:   { name: '書堆',       w: 1, h: 1, g: 'top', kind: 'top' },
+  tplant:   { name: '小盆栽',     w: 1, h: 1, g: 'top', kind: 'top' },
+  tplant2:  { name: '多肉盆栽',   w: 1, h: 1, g: 'top', kind: 'top' },
+  tlamp:    { name: '檯燈',       w: 1, h: 1, g: 'top', kind: 'top' },
+  radio:    { name: '收音機',     w: 1, h: 1, g: 'top', kind: 'top' },
+  tspk:     { name: '小喇叭',     w: 1, h: 1, g: 'top', kind: 'top' },
+  brew:     { name: '咖啡機',     w: 1, h: 1, g: 'top', kind: 'top' },
+  obox:     { name: '打開的紙箱', w: 1, h: 1, g: 'top', kind: 'top' },
+  wlamp:    { name: '壁燈',       w: 1, h: 1, g: 'wall', kind: 'wall' },
+  mirror:   { name: '鏡子',       w: 1, h: 1, g: 'wall', kind: 'wall' },
+  wcab:     { name: '吊櫃',       w: 1, h: 1, g: 'wall', kind: 'wall' },
+  rround:   { name: '圓形地毯',   w: 2, h: 2, g: 'rug', kind: 'rug' },
+  rsquare:  { name: '方形地毯',   w: 2, h: 2, g: 'rug', kind: 'rug' },
+  rbig:     { name: '大地毯',     w: 3, h: 2, g: 'rug', kind: 'rug' },
+  mat:      { name: '門墊',       w: 1, h: 1, g: 'rug', kind: 'rug' },
 };
 const AVATAR_RANGES = { skin: 5, hair: 6, hairColor: 7, shirt: 8, acc: 5 };
 const POSES = 4; // 專注姿勢:0 打字、1 站著、2 看書、3 寫字
 const MAX_FOCUS_MIN = 180, MAX_TODOS = 30, MAX_HABITS = 8, KEEP_DAYS = 70;
 const PARTY_COUNTDOWN = 20000; // 共同專注發起後,等大家加入的時間
-const THEME_COUNT = 6;
+const THEME_COUNT = 6, COLOR_COUNT = 8; // 家具可換 8 種顏色(0 = 原色)
+const colOf = (c) => (Number.isInteger(c) && c > 0 && c < COLOR_COUNT ? c : 0);
 const EMOTES = ['👋', '❤️', '😂', '👍', '🔥', '☕', '💤', '✨'];
 
 // ---------- 存檔 ----------
@@ -102,23 +154,30 @@ function canPlace(items, type, x, y, r, ignoreId) {
 
 // 成品房間:一鍵套用整套擺設(wall / floor 是牆面與地板的樣式編號)
 const PRESETS = {
+  // 每筆:[家具, x, y, 旋轉(0–3), 顏色(0–7)]
   study: { name: '書房', wall: 0, floor: 0, items: [
-    ['desk', 2, 2], ['chair', 3, 1], ['plant', 0, 0], ['lamp', 1, 1], ['bookshelf', 4, 0], ['plant', 5, 4],
-    ['rug', 2, 3], ['armchair', 0, 3, 1], ['cabinet', 5, 2, 3], ['cat', 1, 4],
-    ['window', 2, 0], ['painting', 1, 0], ['shelf', 4, 0], ['poster', 0, 0],
+    ['kcase', 0, 0], ['bigplant', 1, 0], ['kchair', 3, 0], ['lowcase', 4, 0], ['doorcase', 5, 0],
+    ['kdesk', 2, 1], ['flamp', 5, 1], ['ksofa', 0, 2, 1, 4], ['coffee', 1, 3], ['widecase', 5, 2, 3], ['side', 0, 4], ['cat', 2, 4],
+    ['tlaptop', 3, 1, 2], ['tlamp', 2, 1, 2], ['radio', 4, 0], ['tbooks', 1, 3], ['tplant2', 2, 3], ['tplant', 0, 4],
+    ['rbig', 1, 2, 0, 6], ['mat', 4, 4],
+    ['window', 2, 0], ['poster', 0, 0], ['painting', 1, 0], ['wlamp', 4, 0], ['clock', 5, 0],
   ] },
   bedroom: { name: '臥室', wall: 2, floor: 2, items: [
-    ['bed', 0, 0], ['cabinet', 1, 0], ['pc', 2, 0], ['chair', 3, 1], ['bookshelf', 4, 0], ['lamp', 5, 1],
-    ['rug2', 1, 2], ['armchair', 0, 3, 1], ['plant', 5, 4], ['tree', 0, 4], ['cat', 4, 3],
-    ['window', 2, 0], ['neon', 1, 0], ['clock', 4, 0], ['poster', 5, 0],
+    ['dbed', 0, 0, 0, 5], ['side', 2, 0], ['kdesk', 3, 0, 0, 4], ['kcase', 5, 0, 0, 4], ['kchair', 3, 1], ['bin', 4, 1],
+    ['lowcase', 5, 2, 3, 4], ['arcade', 5, 3, 3], ['lchair', 0, 2, 1, 5], ['ottoman', 1, 2, 0, 5], ['box', 0, 4], ['bigplant', 5, 4],
+    ['monitor', 3, 0], ['tbooks', 4, 0], ['tlamp', 2, 0], ['radio', 5, 2, 3], ['obox', 1, 4],
+    ['rround', 1, 2, 0, 6], ['mat', 4, 4],
+    ['window', 0, 0], ['neon', 2, 0], ['shelf', 3, 0], ['clock', 5, 0],
   ] },
   lounge: { name: '客廳', wall: 4, floor: 1, items: [
-    ['sofa', 0, 2, 1], ['table', 1, 3], ['tv', 5, 3, 3], ['rug', 1, 2], ['desk', 3, 1], ['chair', 4, 0],
-    ['bookshelf', 0, 0], ['lamp', 0, 4], ['plant', 5, 0], ['tree', 5, 4], ['cat', 2, 4], ['stool', 2, 0],
-    ['window', 3, 0], ['shelf', 0, 0], ['painting', 5, 0], ['neon', 2, 0],
+    ['bigplant', 0, 0], ['kcase', 1, 0, 0, 3], ['kdesk', 2, 0, 0, 3], ['fridge', 4, 0], ['vending', 5, 0], ['kchair', 2, 1], ['flamp', 0, 1],
+    ['ksofa', 0, 2, 1, 2], ['coffee', 2, 2, 1, 3], ['tv2', 5, 2, 3, 3], ['arcade', 5, 1, 3], ['side', 0, 4, 0, 3], ['cat', 3, 4], ['spk', 5, 4],
+    ['monitor', 2, 0], ['tbooks', 3, 0], ['tplant2', 2, 2], ['radio', 2, 3, 1], ['tplant', 0, 4],
+    ['rbig', 1, 2, 0, 4], ['mat', 4, 4],
+    ['window', 2, 0], ['neon', 0, 0], ['clock', 4, 0], ['wlamp', 5, 0], ['painting', 1, 0],
   ] },
 };
-const presetItems = (key) => PRESETS[key].items.map(([type, x, y, r], i) => ({ id: i + 1, type, x, y, ...(r ? { r } : {}) }));
+const presetItems = (key) => PRESETS[key].items.map(([type, x, y, r, c], i) => ({ id: i + 1, type, x, y, ...(r ? { r } : {}), ...(c ? { c } : {}) }));
 migrateRooms();
 
 function newRoom(ownerKey) {
@@ -195,6 +254,22 @@ const focusView = (f) => f && {
   mode: f.mode, phase: f.phase, round: f.round,
   left: Math.max(0, f.end - Date.now()), elapsed: Date.now() - f.start,
 };
+
+// 進房間時站在沒有家具的地板上(優先選靠房門那半邊)
+function freeSpot(room) {
+  const used = new Set();
+  for (const it of room.items) {
+    if (CATALOG[it.type]?.kind !== 'floor') continue;
+    const [w, h] = dims(it.type, it.r);
+    for (let x = it.x; x < it.x + w; x++) for (let y = it.y; y < it.y + h; y++) used.add(x + ',' + y);
+  }
+  const free = [];
+  for (let x = 0; x < COLS; x++) for (let y = 0; y < ROWS; y++) if (!used.has(x + ',' + y)) free.push([x, y]);
+  const front = free.filter(([, y]) => y >= 2 && y <= ROWS - 2), pool = front.length ? front : free;
+  if (!pool.length) return [COLS / 2, ROWS / 2];
+  const [x, y] = pool[Math.floor(Math.random() * pool.length)];
+  return [x + 0.35 + Math.random() * 0.3, y + 0.35 + Math.random() * 0.3];
+}
 
 // ---------- 連線狀態 ----------
 const live = new Map(); // room code -> Set<client>
@@ -287,8 +362,7 @@ const handlers = {
     if (code && code !== p.room && (live.get(code)?.size || 0) >= MAX_ROOM_PLAYERS) { notice = '那個房間客滿了,已回到你的房間'; code = ''; }
     const room = rooms[code || p.room];
     c.room = room.code;
-    c.x = 1.2 + Math.random() * 1.6;
-    c.y = 3.3 + Math.random() * 0.6;
+    [c.x, c.y] = freeSpot(room);
     const reward = settleFocus(p, false);
 
     if (!live.has(room.code)) live.set(room.code, new Set());
@@ -417,7 +491,7 @@ const handlers = {
     if (!d) return;
     if (room.items.length >= MAX_ITEMS) return send(c, { t: 'toast', text: '房間放不下更多東西了' });
     if (!canPlace(room.items, m.type, m.x, m.y, r)) return;
-    room.items.push({ id: room.nextId++, type: m.type, x: m.x, y: m.y, ...(r && d.kind !== 'wall' ? { r } : {}) });
+    room.items.push({ id: room.nextId++, type: m.type, x: m.x, y: m.y, ...(r && d.kind !== 'wall' ? { r } : {}), ...(colOf(m.c) ? { c: colOf(m.c) } : {}) });
     roomChanged(room);
   },
 
@@ -429,6 +503,7 @@ const handlers = {
     if (!canPlace(room.items, it.type, m.x, m.y, r, it.id)) return;
     it.x = m.x; it.y = m.y;
     if (r && CATALOG[it.type].kind !== 'wall') it.r = r; else delete it.r;
+    if (m.c !== undefined) { if (colOf(m.c)) it.c = colOf(m.c); else delete it.c; }
     roomChanged(room);
   },
 
@@ -515,7 +590,7 @@ const server = http.createServer((req, res) => {
   if (ad) { hit = [null, 'text/javascript; charset=utf-8']; file = path.join(THREE_DIR, 'examples/jsm', ad[1]); }
   if (url === '/vendor/three-vrm.js') { hit = [null, 'text/javascript; charset=utf-8']; file = path.join(__dirname, 'node_modules/@pixiv/three-vrm/lib/three-vrm.module.min.js'); }
   // 家具與角色模型(KayKit、VRoid 範例角色等,皆為 CC0)
-  const as = /^\/assets\/(kaykit|avatars|extra)\/((?:textures\/)?[\w-]+\.(gltf|glb|vrm|bin|png|jpg|txt))$/.exec(url);
+  const as = /^\/assets\/(kaykit|kenney|avatars|extra)\/((?:[Tt]extures\/)?[\w-]+\.(gltf|glb|vrm|bin|png|jpg|txt))$/.exec(url);
   if (as) {
     const types = { gltf: 'model/gltf+json', glb: 'model/gltf-binary', vrm: 'application/octet-stream', bin: 'application/octet-stream', png: 'image/png', jpg: 'image/jpeg', txt: 'text/plain; charset=utf-8' };
     hit = [null, types[as[3]]]; file = path.join(__dirname, 'public/assets', as[1], as[2]);
