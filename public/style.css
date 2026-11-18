@@ -116,7 +116,7 @@ h3 { font-size: 12px; color: var(--muted); margin: 18px 0 8px; font-weight: 600;
 .seg.small button { font-size: 12px; padding: 3px 8px; }
 
 .widgets {
-  position: fixed; left: 16px; top: 60px; bottom: 16px; z-index: 4; width: 264px;
+  position: fixed; left: 16px; top: 60px; bottom: 84px; z-index: 4; width: 264px;
   display: flex; flex-direction: column; gap: 10px;
   pointer-events: none; overflow-y: auto; scrollbar-width: none;
 }
@@ -318,11 +318,34 @@ body.focusing #timerSetup, body.focusing #modes, body.focusing #poses { display:
 #chartTable th, #chartTable td { text-align: left; padding: 3px 0; border-bottom: 1px solid var(--line); font-weight: 400; }
 #chartTable td:last-child, #chartTable th:last-child { text-align: right; }
 
+/* 可收合的小卡片 */
+.cardTog {
+  display: flex; justify-content: space-between; align-items: center; gap: 10px; width: 100%;
+  background: transparent; border: 0; padding: 0;
+  font-size: 12px; color: var(--muted); font-weight: 600; letter-spacing: .12em;
+}
+.cardTog i { width: 8px; height: 8px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(-135deg); margin: 4px 4px 0 0; transition: transform .15s; }
+.card.min .cardTog i { transform: rotate(45deg); margin: 0 4px 4px 0; }
+.card.min { align-self: flex-start; padding: 8px 14px; border-radius: 999px; }
+.card.min > :not(.cardTog) { display: none; }
+#timerCard.min { border-radius: 20px; padding: 10px 14px; min-width: 150px; }
+#timerCard.min > #timerText, #timerCard.min > #focusBtn { display: block; }
+#timerCard.min > #timerText { font-size: 38px; }
+#timerCard.min > #focusBtn { padding: 4px; font-size: 13px; }
+#timerCard.min .ttl::after { content: attr(data-x); }
+
+#clock {
+  position: fixed; left: 18px; bottom: 16px; z-index: 4; pointer-events: none;
+  display: flex; flex-direction: column; line-height: 1.15;
+  text-shadow: 0 1px 10px rgba(0, 0, 0, .55);
+}
+#clock span { font-size: 13px; opacity: .9; }
+#clock b { font-size: 34px; font-variant-numeric: tabular-nums; letter-spacing: .03em; }
 @media (max-width: 860px) {
   h1 { display: none; }
   .hud { padding: 8px; gap: 6px; }
   .views { margin-left: 0; }
-  .widgets { left: 8px; top: 92px; width: 156px; bottom: 110px; }
+  .widgets { left: 8px; top: 92px; width: 190px; bottom: 170px; }
   .card { padding: 8px; gap: 6px; border-radius: 16px; }
   #timerText { font-size: 32px; }
   #timerLabel, #poses, .mini { display: none; }
@@ -331,7 +354,8 @@ body.focusing #timerSetup, body.focusing #modes, body.focusing #poses { display:
   .setup input { width: 40px; }
   #statusInput { font-size: 12px; padding: 4px 8px; }
   #focusBtn { padding: 6px; font-size: 14px; }
-  #todoCard, #musicCard { display: none; }
+  #clock b { font-size: 24px; }
+  #clock { bottom: 108px; left: 10px; }
   #drawer { left: 8px; right: 8px; top: auto; bottom: 8px; width: auto; height: 62vh; }
   #tabs button { padding: 7px 9px; font-size: 13px; }
   #partyBar { top: 92px; border-radius: 18px; flex-wrap: wrap; justify-content: center; padding: 8px 12px; }

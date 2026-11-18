@@ -8,10 +8,11 @@ const { WebSocketServer } = require('ws');
 
 const PORT = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
-const COLS = 8, ROWS = 6, MAX_ITEMS = 60, MAX_ROOM_PLAYERS = 12;
+const COLS = 6, ROWS = 5, MAX_ITEMS = 60, MAX_ROOM_PLAYERS = 12;
 
 // kind: floor(佔地板格) / rug(鋪在地上,可被踩與疊放) / wall(掛在牆上)
 const CATALOG = {
+  pc:        { name: '電腦桌',   w: 2, h: 1, kind: 'floor' },
   desk:      { name: '書桌',     w: 2, h: 1, kind: 'floor' },
   chair:     { name: '椅子',     w: 1, h: 1, kind: 'floor' },
   plant:     { name: '盆栽',     w: 1, h: 1, kind: 'floor' },
@@ -23,6 +24,8 @@ const CATALOG = {
   window:    { name: '窗戶',     w: 2, h: 1, kind: 'wall' },
   table:     { name: '小桌',     w: 1, h: 1, kind: 'floor' },
   shelf:     { name: '壁掛書架', w: 2, h: 1, kind: 'wall' },
+  poster:    { name: '海報',     w: 1, h: 1, kind: 'wall' },
+  neon:      { name: '霓虹燈',   w: 1, h: 1, kind: 'wall' },
   painting:  { name: '掛畫',     w: 1, h: 1, kind: 'wall' },
   cabinet:   { name: '床頭櫃',   w: 1, h: 1, kind: 'floor' },
   bookshelf: { name: '置物櫃',   w: 2, h: 1, kind: 'floor' },
@@ -49,6 +52,8 @@ const profiles = loadJson('profiles.json'); // key(sha256 of token) -> profile
 const rooms = loadJson('rooms.json');       // code -> room
 // 舊存檔相容:魚缸已改為電視
 for (const r of Object.values(rooms)) for (const it of r.items || []) if (it.type === 'aquarium') it.type = 'tv';
+// 舊存檔相容:房間從 8×6 縮成 6×5,放不下的舊房間換成預設書房(在 PRESETS 定義之後執行)
+const migrateRooms = () => { for (const r of Object.values(rooms)) if ((r.items || []).some((it) => !CATALOG[it.type] || it.x + dims(it.type, it.r)[0] > COLS || (CATALOG[it.type].kind !== 'wall' && it.y + dims(it.type, it.r)[1] > ROWS))) { r.items = presetItems('study'); r.nextId = r.items.length + 1; markDirty(); } };
 // 舊存檔相容:舊版的專注紀錄沒有模式欄位,直接清掉
 for (const p of Object.values(profiles)) if (p.focus && !p.focus.mode) p.focus = null;
 let dirty = false;
@@ -98,21 +103,23 @@ function canPlace(items, type, x, y, r, ignoreId) {
 // 成品房間:一鍵套用整套擺設(wall / floor 是牆面與地板的樣式編號)
 const PRESETS = {
   study: { name: '書房', wall: 0, floor: 0, items: [
-    ['desk', 3, 2], ['chair', 4, 1], ['plant', 0, 0], ['lamp', 2, 1], ['bookshelf', 6, 0], ['plant', 7, 5],
-    ['rug', 3, 3], ['window', 3, 0], ['painting', 1, 0], ['shelf', 6, 0], ['plant', 0, 5],
+    ['desk', 2, 2], ['chair', 3, 1], ['plant', 0, 0], ['lamp', 1, 1], ['bookshelf', 4, 0], ['plant', 5, 4],
+    ['rug', 2, 3], ['armchair', 0, 3, 1], ['cabinet', 5, 2, 3], ['cat', 1, 4],
+    ['window', 2, 0], ['painting', 1, 0], ['shelf', 4, 0], ['poster', 0, 0],
   ] },
   bedroom: { name: '臥室', wall: 2, floor: 2, items: [
-    ['bed', 0, 0], ['cabinet', 1, 0], ['desk', 4, 2], ['chair', 5, 1], ['lamp', 3, 1], ['bookshelf', 6, 0],
-    ['rug2', 1, 3], ['armchair', 0, 4, 1], ['plant', 7, 5], ['tree', 3, 0],
-    ['window', 4, 0], ['painting', 2, 0], ['clock', 7, 0],
+    ['bed', 0, 0], ['cabinet', 1, 0], ['pc', 2, 0], ['chair', 3, 1], ['bookshelf', 4, 0], ['lamp', 5, 1],
+    ['rug2', 1, 2], ['armchair', 0, 3, 1], ['plant', 5, 4], ['tree', 0, 4], ['cat', 4, 3],
+    ['window', 2, 0], ['neon', 1, 0], ['clock', 4, 0], ['poster', 5, 0],
   ] },
   lounge: { name: '客廳', wall: 4, floor: 1, items: [
-    ['sofa', 0, 2, 1], ['table', 2, 3], ['tv', 6, 3, 3], ['rug', 2, 2], ['desk', 3, 1], ['chair', 4, 0],
-    ['bookshelf', 0, 0], ['lamp', 0, 4], ['plant', 7, 0], ['tree', 7, 5], ['cat', 3, 4], ['stool', 2, 0],
-    ['window', 3, 0], ['shelf', 0, 0], ['painting', 6, 0],
+    ['sofa', 0, 2, 1], ['table', 1, 3], ['tv', 5, 3, 3], ['rug', 1, 2], ['desk', 3, 1], ['chair', 4, 0],
+    ['bookshelf', 0, 0], ['lamp', 0, 4], ['plant', 5, 0], ['tree', 5, 4], ['cat', 2, 4], ['stool', 2, 0],
+    ['window', 3, 0], ['shelf', 0, 0], ['painting', 5, 0], ['neon', 2, 0],
   ] },
 };
 const presetItems = (key) => PRESETS[key].items.map(([type, x, y, r], i) => ({ id: i + 1, type, x, y, ...(r ? { r } : {}) }));
+migrateRooms();
 
 function newRoom(ownerKey) {
   let code;
@@ -280,8 +287,8 @@ const handlers = {
     if (code && code !== p.room && (live.get(code)?.size || 0) >= MAX_ROOM_PLAYERS) { notice = '那個房間客滿了,已回到你的房間'; code = ''; }
     const room = rooms[code || p.room];
     c.room = room.code;
-    c.x = 2.5 + Math.random() * 3;
-    c.y = 2.5 + Math.random() * 2.5;
+    c.x = 1.2 + Math.random() * 1.6;
+    c.y = 3.3 + Math.random() * 0.6;
     const reward = settleFocus(p, false);
 
     if (!live.has(room.code)) live.set(room.code, new Set());

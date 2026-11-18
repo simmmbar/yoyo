@@ -4,6 +4,10 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 
 (() => {
 'use strict';
@@ -19,8 +23,8 @@ const store = {
 };
 
 // ---------- 常數 ----------
-const WALLH = 4;
-let COLS = 8, ROWS = 6, CATALOG = {};
+const WALLH = 3.3;
+let COLS = 6, ROWS = 5, CATALOG = {};
 // 膚色是疊在原貼圖上的色調(第一個 = 原色);髮色與上衣的第一個選項也是「原色」
 const SKIN = ['#ffffff', '#ffeadb', '#f4cfb2', '#d6a27c', '#a8704e'];
 const HAIRC = [null, '#4a3f52', '#7a5238', '#c58a4a', '#f2cf7a', '#f29ab0', '#8ea4ee'];
@@ -183,7 +187,7 @@ renderer.toneMappingExposure = 1.12;
 
 const scene = new THREE.Scene();
 const VIEW_DIR = new THREE.Vector3(1, 0.82, 1).normalize();
-const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 200);
+const camera = new THREE.PerspectiveCamera(50, 1, 0.08, 120);
 
 function addLights(sc, shadows) {
   const hemi = new THREE.HemisphereLight(0xffeedd, 0x8f7fc0, 0.95);
@@ -198,7 +202,7 @@ function addLights(sc, shadows) {
   }
   // 室內的暖色主燈:白天關著,黃昏和夜晚才亮
   const roomLight = new THREE.PointLight(0xffc48a, 0, 16, 1.5);
-  roomLight.position.set(COLS / 2, 3.5, ROWS / 2 + 0.5);
+  roomLight.position.set(COLS / 2, WALLH - 0.35, ROWS / 2 + 0.3);
   sc.add(hemi, sun, sun.target, roomLight);
   return { hemi, sun, roomLight };
 }
@@ -206,9 +210,9 @@ const LIGHTS = addLights(scene, true);
 
 // 光線氛圍:白天 / 黃昏 / 夜晚(自動 = 依你當地的時間)
 const MOODS = {
-  day:   { sky: 0xffeedd, ground: 0x8f7fc0, hemi: 0.95, sun: 0xffdcb4, sunI: 2.7, lamp: 9,  room: 0,  exp: 1.12 },
-  dusk:  { sky: 0xffd2b4, ground: 0x7a659e, hemi: 0.7,  sun: 0xff9a62, sunI: 1.8, lamp: 13, room: 14, exp: 1.08 },
-  night: { sky: 0xc4c8ee, ground: 0x4a4266, hemi: 0.5,  sun: 0xb4c0f4, sunI: 0.45, lamp: 20, room: 38, exp: 1.04 },
+  day:   { sky: 0xffeedd, ground: 0x8f7fc0, hemi: 0.95, sun: 0xffdcb4, sunI: 2.7,  lamp: 5,  room: 0, exp: 1.12, bloomT: 1.7, bloomS: 0.2 },
+  dusk:  { sky: 0xffd2b4, ground: 0x7a659e, hemi: 0.8,  sun: 0xff9a62, sunI: 1.6,  lamp: 7,  room: 4, exp: 1.08, bloomT: 1.7, bloomS: 0.24 },
+  night: { sky: 0xd8d2ee, ground: 0x554a70, hemi: 0.72, sun: 0xb4c0f4, sunI: 0.35, lamp: 8,  room: 9, exp: 1.04, bloomT: 1.7, bloomS: 0.28 },
 };
 let moodPref = store.get('yoyo_mood') || 'auto', mood = 'day';
 const autoMood = () => { const h = new Date().getHours() + new Date().getMinutes() / 60; return h < 6 || h >= 19 ? 'night' : h >= 17 || h < 7.5 ? 'dusk' : 'day'; };
@@ -221,6 +225,7 @@ function applyMood() {
   LIGHTS.sun.color.set(m.sun); LIGHTS.sun.intensity = m.sunI;
   LIGHTS.roomLight.intensity = m.room;
   renderer.toneMappingExposure = m.exp;
+  if (bloom) { bloom.threshold = m.bloomT; bloom.strength = m.bloomS; }
   for (const l of lampLights) l.intensity = m.lamp;
   document.body.dataset.mood = mood;
   return changed;
@@ -342,13 +347,56 @@ const BUILD = {
     const lap = new THREE.Group();
     lap.add(box(0.46, 0.025, 0.32, '#d9dce6', 0, 0, 0.06, 0.01));
     const scr = box(0.46, 0.3, 0.02, '#4a4d68', 0, 0.02, -0.1, 0.008); scr.rotation.x = -0.18; lap.add(scr);
-    const lit = box(0.4, 0.24, 0.006, '#bfe6f5', 0, 0.05, -0.087, 0.002, glow('#9fd8f0', 0.9)); lit.rotation.x = -0.18; lap.add(lit);
+    const lit = box(0.4, 0.24, 0.006, '#bfe6f5', 0, 0.05, -0.087, 0.002, glow('#9fd8f0', 1.3)); lit.rotation.x = -0.18; lap.add(lit);
     lap.position.set(sx, 0.82, 0.5); lap.rotation.y = side > 0 ? 0 : Math.PI;
     g.add(lap);
     g.add(cyl(0.055, 0.045, 0.11, CREAM, sx + (sx > 1 ? -0.42 : 0.42), 0.82, 0.5 - side * 0.12), cyl(0.045, 0.045, 0.01, '#8a5a3c', sx + (sx > 1 ? -0.42 : 0.42), 0.925, 0.5 - side * 0.12));
     g.add(box(0.32, 0.05, 0.24, BOOKS[0], ox, 0.82, 0.5, 0.01));
     const b2 = box(0.28, 0.05, 0.22, BOOKS[2], ox, 0.87, 0.5, 0.01); b2.rotation.y = 0.25; g.add(b2);
     g.add(cyl(0.05, 0.04, 0.12, '#8c9cea', ox + (sx > 1 ? -0.22 : 0.22), 0.82, 0.5 - side * 0.2), cyl(0.008, 0.008, 0.16, '#ffc98a', ox + (sx > 1 ? -0.23 : 0.21), 0.86, 0.5 - side * 0.2), cyl(0.008, 0.008, 0.17, '#ee8a8f', ox + (sx > 1 ? -0.2 : 0.24), 0.86, 0.5 - side * 0.19));
+  },
+  // 電腦桌:螢幕、鍵盤、滑鼠朝向有椅子的那一側
+  pc(g, o = {}) {
+    const side = o.side || 1, sx = o.sx ?? 0.95, ox = sx > 1 ? 0.38 : 1.62;
+    put(g, 'table_medium_long', [0.64, 0.82, 0.42], 1, 0, 0.5);
+    const set = new THREE.Group();
+    set.add(box(0.2, 0.02, 0.14, '#3b3d52', 0, 0, -0.16, 0.006), box(0.04, 0.16, 0.03, '#3b3d52', 0, 0.02, -0.17, 0.006));
+    set.add(box(0.72, 0.42, 0.03, '#2b2d40', 0, 0.16, -0.15, 0.012));
+    const scr = picture(0.67, 0.37, canvasTex('pcscreen', 256, 144, (c, w, h) => {
+      const gr = c.createLinearGradient(0, 0, w, h); gr.addColorStop(0, '#2c3a78'); gr.addColorStop(1, '#7a4f9a'); c.fillStyle = gr; c.fillRect(0, 0, w, h);
+      c.fillStyle = 'rgba(255,255,255,.92)'; c.fillRect(18, 16, 132, 96); c.fillStyle = '#8c9cea'; c.fillRect(18, 16, 132, 12);
+      c.fillStyle = '#c9cfe8'; for (let i = 0; i < 6; i++) c.fillRect(28, 38 + i * 11, 60 + ((i * 37) % 50), 5);
+      c.fillStyle = 'rgba(255,255,255,.85)'; c.fillRect(162, 30, 78, 60); c.fillStyle = '#ffc98a'; c.beginPath(); c.arc(201, 60, 18, 0, 7); c.fill();
+    }), 0, 0.37, -0.133);
+    set.add(scr);
+    set.add(box(0.46, 0.02, 0.15, '#e6e8f0', 0, 0, 0.1, 0.006), box(0.07, 0.022, 0.1, '#e6e8f0', 0.36, 0, 0.1, 0.01), box(0.2, 0.004, 0.18, '#56506e', 0.36, 0, 0.1, 0.002));
+    set.position.set(sx, 0.82, 0.5); set.rotation.y = side > 0 ? 0 : Math.PI;
+    g.add(set);
+    g.add(cyl(0.055, 0.045, 0.11, CREAM, ox, 0.82, 0.5 + side * 0.08), cyl(0.045, 0.045, 0.01, '#8a5a3c', ox, 0.925, 0.5 + side * 0.08));
+    g.add(box(0.26, 0.04, 0.2, BOOKS[4], ox, 0.82, 0.5 - side * 0.16, 0.01));
+    g.userData.glowAt = null;
+  },
+  poster(g) {
+    const tex = canvasTex('poster', 256, 352, (c, w, h) => {
+      const gr = c.createLinearGradient(0, 0, 0, h); gr.addColorStop(0, '#2b2f66'); gr.addColorStop(0.55, '#c45c8a'); gr.addColorStop(1, '#ffb27a'); c.fillStyle = gr; c.fillRect(0, 0, w, h);
+      c.fillStyle = '#ffe3b0'; c.beginPath(); c.arc(w / 2, h * 0.52, 46, 0, 7); c.fill();
+      c.fillStyle = '#3a2a5c'; c.beginPath(); c.moveTo(0, h); c.lineTo(0, h * 0.72); c.lineTo(70, h * 0.56); c.lineTo(130, h * 0.7); c.lineTo(190, h * 0.6); c.lineTo(w, h * 0.74); c.lineTo(w, h); c.fill();
+      c.fillStyle = '#241a40'; c.beginPath(); c.moveTo(0, h); c.lineTo(0, h * 0.86); c.lineTo(90, h * 0.76); c.lineTo(170, h * 0.88); c.lineTo(w, h * 0.8); c.lineTo(w, h); c.fill();
+      c.fillStyle = '#fff'; for (let i = 0; i < 18; i++) { c.globalAlpha = 0.5 + (i % 4) * 0.12; c.fillRect((i * 67) % w, (i * 41) % (h * 0.4), 2, 2); } c.globalAlpha = 1;
+    });
+    g.add(box(0.74, 1.02, 0.03, '#fbf6ec', 0.5, 1.42, 0.02, 0.008), picture(0.68, 0.96, tex, 0.5, 1.93, 0.037));
+  },
+  neon(g) {
+    const pink = mat('#ff7fb0', glow('#ff4f98', 5)), blue = mat('#9fe6ff', glow('#5fd0ff', 5));
+    const arc = new THREE.Mesh(geo('neonArc', () => new THREE.TorusGeometry(0.3, 0.022, 10, 48, Math.PI * 1.25)), pink);
+    arc.position.set(0.46, 2.05, 0.05); arc.rotation.z = Math.PI * 0.42;
+    const arc2 = new THREE.Mesh(geo('neonArc2', () => new THREE.TorusGeometry(0.24, 0.02, 10, 40, Math.PI * 0.95)), pink);
+    arc2.position.set(0.56, 2.08, 0.05); arc2.rotation.z = Math.PI * 0.56;
+    const star = new THREE.Group();
+    for (const a of [0, Math.PI / 2, Math.PI / 4, -Math.PI / 4]) { const b = new THREE.Mesh(geo('neonBar', () => new THREE.CapsuleGeometry(0.016, 0.2, 4, 8)), blue); b.rotation.z = a; b.scale.y = a % (Math.PI / 2) ? 0.6 : 1; star.add(b); }
+    star.position.set(0.72, 2.3, 0.05);
+    g.add(arc, arc2, star, box(0.6, 0.02, 0.02, '#3b3a4a', 0.5, 1.7, 0.02, 0.005));
+    g.userData.neonAt = new THREE.Vector3(0.5, 2.1, 0.5);
   },
   lamp(g) {
     put(g, 'lamp_standing', 0.68, 0.5, 0, 0.5);
@@ -365,7 +413,7 @@ const BUILD = {
       m.emissiveIntensity = 0.6 * k;
       m.emissive.setHSL(hue, 0.85, 0.55);
       const l = g.userData.glow; // 螢幕前方的光,跟著螢幕一起閃動
-      if (l) { l.intensity = 16 * k; l.color.setHSL(hue, 1, 0.5); }
+      if (l) { l.intensity = 4 * k; l.color.setHSL(hue, 1, 0.5); }
     };
     g.userData.glowAt = new THREE.Vector3(0.5, 0.62, 1.05);
   },
@@ -375,7 +423,7 @@ const BUILD = {
     const bb = new THREE.Box3();
     m.updateMatrixWorld(true);
     m.traverse((o) => { if (o.isSkinnedMesh) { o.computeBoundingBox(); bb.union(o.boundingBox.clone().applyMatrix4(o.matrixWorld)); } });
-    const k = 0.8 / (bb.max.y - bb.min.y || 1);
+    const k = 0.42 / (bb.max.y - bb.min.y || 1); // 貓咪大約到小腿高
     m.scale.setScalar(k); m.position.set(0.5, -bb.min.y * k, 0.45); m.rotation.y = 0.5;
     g.add(m);
     const clip = MODEL.catClips.find((c) => /Idle$/.test(c.name));
@@ -400,8 +448,14 @@ const BUILD = {
       } else {
         c.fillStyle = mode === 'dusk' ? '#ffe0a0' : '#fff7c4'; c.beginPath(); c.arc(190, mode === 'dusk' ? 150 : 60, 24, 0, 7); c.fill();
         c.fillStyle = 'rgba(255,255,255,.9)';
-        for (const [x, y, r] of [[60, 80, 22], [88, 70, 28], [118, 82, 20], [150, 150, 16], [172, 144, 20]]) { c.beginPath(); c.arc(x, y, r, 0, 7); c.fill(); }
+        for (const [x, y, r] of [[60, 60, 20], [86, 52, 26], [114, 62, 18], [176, 96, 12], [192, 92, 15]]) { c.beginPath(); c.arc(x, y, r, 0, 7); c.fill(); }
       }
+      // 遠山與近處的樹叢,窗外才不會只有天空
+      const land = { night: ['#232a55', '#161b3a'], dusk: ['#7d5a8c', '#4b3a66'], day: ['#8fcf8a', '#5fae6a'] }[mode];
+      c.fillStyle = land[0]; c.beginPath(); c.moveTo(0, h); c.lineTo(0, h * 0.74); c.quadraticCurveTo(w * 0.25, h * 0.58, w * 0.5, h * 0.72); c.quadraticCurveTo(w * 0.78, h * 0.86, w, h * 0.66); c.lineTo(w, h); c.fill();
+      c.fillStyle = land[1]; c.beginPath(); c.moveTo(0, h); c.lineTo(0, h * 0.88);
+      for (let i = 0; i <= 8; i++) c.quadraticCurveTo((i + 0.5) * w / 8 - w / 16, h * (0.8 + (i % 3) * 0.02), (i + 1) * w / 8, h * 0.9);
+      c.lineTo(w, h); c.fill();
     });
     // Kenney 的窗框(直立窗),左右各一扇,後面襯一片天空
     const S = 2.3;
@@ -434,7 +488,7 @@ function buildItem(type, opt) {
 
 // ---------- 座位:椅子自動朝向最近的桌子,專注時角色會走過去坐下 ----------
 const SEAT_TYPES = { chair: 0.44, stool: 0.42, armchair: 0.4 }; // 座面高度
-const DESK_TYPES = ['desk', 'table'];
+const DESK_TYPES = ['desk', 'pc', 'table'];
 let seats = []; // {id, x, z, face, h}
 // 家具的旋轉(r = 0–3,每格 90 度)與旋轉後的佔地
 const rotOf = (r) => (((r | 0) % 4) + 4) % 4;
@@ -672,7 +726,20 @@ function buildShell() {
   add(box(0.05, 0.22, ROWS, tm, 0.025, 0, ROWS / 2, 0.01));
   add(box(COLS + th, 0.07, th + 0.06, tm, COLS / 2 - th / 2, WALLH, -th / 2 + 0.03, 0.02));
   add(box(th + 0.06, 0.07, ROWS, tm, -th / 2 + 0.03, WALLH, ROWS / 2, 0.02));
-  add(box(COLS + th, 0.45, ROWS + th, tm, COLS / 2 - th / 2, -0.451, ROWS / 2 - th / 2, 0.06));
+  // 房間是封閉的:前牆、右牆和天花板(鏡頭在室內,所以看不到外側)。它們不擋陽光,室內才不會全黑
+  add(box(COLS + th * 2, WALLH, th, wm, COLS / 2, 0, ROWS + th / 2, 0.03));
+  add(box(th, WALLH, ROWS, wm, COLS + th / 2, 0, ROWS / 2, 0.03));
+  add(box(COLS, 0.22, 0.05, tm, COLS / 2, 0, ROWS - 0.025, 0.01));
+  add(box(0.05, 0.22, ROWS, tm, COLS - 0.025, 0, ROWS / 2, 0.01));
+  const ceil = new THREE.Mesh(new THREE.PlaneGeometry(COLS + th * 2, ROWS + th * 2), new THREE.MeshStandardMaterial({ color: '#fbf6ec', roughness: 1, emissive: '#fbf6ec', emissiveIntensity: 0.22 }));
+  ceil.rotation.x = Math.PI / 2; ceil.position.set(COLS / 2, WALLH, ROWS / 2);
+  roomGroup.add(ceil);
+  // 房門(在前牆上,純裝飾)
+  const door = new THREE.Group();
+  door.add(box(1.0, 2.25, 0.06, '#b98352', 0, 0, 0, 0.02), box(1.16, 2.33, 0.04, tm, 0, 0, 0.02, 0.01), sph(0.045, '#e9c46a', -0.36, 1.08, -0.05));
+  door.position.set(COLS - 1.3, 0, ROWS - 0.03);
+  roomGroup.add(door);
+  add(box(COLS + th * 2, 0.45, ROWS + th * 2, tm, COLS / 2, -0.451, ROWS / 2, 0.06));
   floorMesh = new THREE.Mesh(new THREE.PlaneGeometry(COLS, ROWS), new THREE.MeshStandardMaterial({ roughness: 0.75 }));
   floorMesh.rotation.x = -Math.PI / 2; floorMesh.position.set(COLS / 2, 0, ROWS / 2); floorMesh.receiveShadow = true;
   roomGroup.add(floorMesh);
@@ -713,7 +780,7 @@ function rebuildRoom() {
   for (const it of room.items) {
     if (!CATALOG[it.type]) continue;
     let opt, face = rotOf(it.r) * Math.PI / 2;
-    if (it.type === 'desk') { // 筆電擺在有椅子的那一側
+    if (it.type === 'desk' || it.type === 'pc') { // 筆電或螢幕擺在有椅子的那一側
       const st = seats.find((q) => q.desk === it.id);
       if (st) { const [lx, lz] = toLocal(it, st.x, st.z); opt = { side: lz > 0.5 ? 1 : -1, sx: Math.min(1.6, Math.max(0.4, lx)) }; }
     }
@@ -724,7 +791,8 @@ function rebuildRoom() {
       const l = new THREE.PointLight(0xffc27a, MOODS[mood].lamp, 5.5, 1.8); l.position.copy(inner.userData.lampAt); inner.add(l);
       lampLights.push(l);
     }
-    if (inner.userData.glowAt && glows++ < 2) { // 最多兩台電視會照亮房間
+    if (inner.userData.neonAt && glows++ < 3) { const l = new THREE.PointLight(0xff6fa8, 1.6, 3.5, 1.8); l.position.copy(inner.userData.neonAt); inner.add(l); }
+    if (inner.userData.glowAt && glows++ < 3) { // 最多兩台電視會照亮房間
       const l = new THREE.PointLight(0x7fc4f0, 6, 4.5, 1.6); l.position.copy(inner.userData.glowAt); inner.add(l);
       inner.userData.glow = l;
     }
@@ -751,119 +819,39 @@ function syncGhost() {
 }
 
 
-// ---------- 風格化後製(?style=ink|riso|bit|psx) ----------
-const STYLE = new URLSearchParams(location.search).get('style');
-const MODES = { ink: 1, riso: 2, bit: 3, psx: 4 };
-let post = null;
-if (MODES[STYLE]) {
-  const mk = (depth) => {
-    const rt = new THREE.WebGLRenderTarget(4, 4, { type: THREE.HalfFloatType });
-    if (STYLE === 'psx') rt.texture.minFilter = rt.texture.magFilter = THREE.NearestFilter;
-    if (depth) rt.depthTexture = new THREE.DepthTexture(4, 4);
-    return rt;
-  };
-  const rtC = mk(false), rtN = mk(true);
-  const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({
-    uniforms: { tC: { value: rtC.texture }, tN: { value: rtN.texture }, tD: { value: rtN.depthTexture }, res: { value: new THREE.Vector2() }, mode: { value: MODES[STYLE] } },
-    vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0., 1.); }',
-    fragmentShader: `
-      precision highp float;
-      uniform sampler2D tC, tN, tD; uniform vec2 res; uniform int mode; varying vec2 vUv;
-      vec3 srgb(vec3 c){ return pow(clamp(c, 0., 1.), vec3(1. / 2.2)); }
-      float lum(vec3 c){ return dot(c, vec3(.299, .587, .114)); }
-      float b2(vec2 a){ a = floor(a); return fract(a.x / 2. + a.y * a.y * .75); }
-      float bayer(vec2 a){ return b2(.5 * a) * .25 + b2(a); }
-      float hash(vec2 p){ return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
-      float edge(float w){
-        vec2 d = w / res; float e = 0.;
-        vec4 n0 = texture2D(tN, vUv); float z0 = texture2D(tD, vUv).r;
-        for (int i = 0; i < 4; i++) {
-          vec2 o = i == 0 ? vec2(d.x, 0.) : i == 1 ? vec2(-d.x, 0.) : i == 2 ? vec2(0., d.y) : vec2(0., -d.y);
-          vec4 n = texture2D(tN, vUv + o);
-          e = max(e, length(n - n0) * 1.4);
-          e = max(e, abs(texture2D(tD, vUv + o).r - z0) * 260.);
-        }
-        return smoothstep(.35, .7, e);
-      }
-      float dots(vec2 p, float ang, float size, float cov){
-        float c = cos(ang), s = sin(ang); p = mat2(c, -s, s, c) * p / size;
-        return smoothstep(.06, -.06, length(fract(p) - .5) - sqrt(clamp(cov, 0., 1.)) * .72);
-      }
-      void main(){
-        vec4 t = texture2D(tC, vUv); float a = t.a; vec3 c = srgb(t.rgb * 1.05);
-        vec2 fc = gl_FragCoord.xy; float scale = res.y / 780.;
-        if (mode == 1) {            // 墨線:平塗色塊 + 黑描邊
-          float l = lum(c), q = (floor(l * 3.5 + .6)) / 3.5;
-          vec3 fl = clamp(c * (q / max(l, .001)), 0., 1.);
-          fl = mix(vec3(lum(fl)), fl, 1.15) * vec3(1., .97, .9);
-          vec3 paper = vec3(.953, .918, .835) - hash(floor(fc / scale)) * .03;
-          vec3 o = mix(paper, fl, a);
-          o = mix(o, vec3(.14, .12, .17), edge(1.6 * scale));
-          gl_FragColor = vec4(o, 1.);
-        } else if (mode == 2) {     // 孔版印刷:三色網點疊印 + 錯位
-          vec3 c2 = srgb(texture2D(tC, vUv + vec2(3., -2.) * scale / res).rgb * 1.05);
-          float a2 = texture2D(tC, vUv + vec2(3., -2.) * scale / res).a;
-          float blue = mix(.0, 1. - lum(c), a) * 1.15;
-          float pink = mix(.0, clamp((c2.r - c2.b) * 1.6 + (1. - lum(c2)) * .15, 0., 1.), a2);
-          float yel = mix(.0, clamp((min(c.r, c.g) - c.b) * 2.2, 0., 1.), a);
-          vec2 p = fc / scale;
-          vec3 o = vec3(.965, .94, .88);
-          o *= mix(vec3(1.), vec3(1., .91, .0), dots(p, .26, 5., yel) * .9);
-          o *= mix(vec3(1.), vec3(1., .28, .69), dots(p, 1.3, 5., pink) * .92);
-          o *= mix(vec3(1.), vec3(.2, .33, .64), dots(p, .78, 5., blue * blue) * .95);
-          o *= mix(vec3(1.), vec3(.2, .33, .64), edge(1.4 * scale) * .9);
-          o += (hash(p) - .5) * .07;
-          gl_FragColor = vec4(o, 1.);
-        } else if (mode == 3) {     // 1-bit 抖色
-          float l = mix(.06 + step(.992, hash(floor(fc / (2. * scale)))) , lum(c) * 1.1 - .08, a);
-          float on = step(bayer(floor(fc / (2. * scale))), l);
-          on *= 1. - edge(1.6 * scale);
-          gl_FragColor = vec4(mix(vec3(.12, .13, .22), vec3(.94, .9, .8), on), 1.);
-        } else {                    // PS1:低解析度 + 色彩量化
-          c += (bayer(floor(vUv * res)) - .5) / 14.;
-          c = floor(c * 16. + .5) / 16.;
-          gl_FragColor = vec4(c * a, a);
-        }
-      }`,
-  }));
-  quad.frustumCulled = false;
-  const qScene = new THREE.Scene(); qScene.add(quad);
-  const qCam = new THREE.Camera(), normalMat = new THREE.MeshNormalMaterial();
-  post = {
-    resize(w, h) {
-      const k = STYLE === 'psx' ? 300 / h : renderer.getPixelRatio();
-      const W = Math.max(2, Math.round(w * k)), H = Math.max(2, Math.round(h * k));
-      rtC.setSize(W, H); rtN.setSize(W, H);
-      quad.material.uniforms.res.value.set(W, H);
-    },
-    render() {
-      renderer.setRenderTarget(rtC); renderer.setClearColor(0x000000, 0); renderer.clear(); renderer.render(scene, camera);
-      scene.overrideMaterial = normalMat;
-      renderer.setRenderTarget(rtN); renderer.clear(); renderer.render(scene, camera);
-      scene.overrideMaterial = null;
-      renderer.setRenderTarget(null); renderer.render(qScene, qCam);
-    },
-  };
+// ---------- 柔光後製(可在設定關閉,比較省電) ----------
+let fxOn = store.get('yoyo_fx') !== '0', composer = null, bloom = null;
+function setupFx() {
+  if (composer) { composer.dispose?.(); composer = null; }
+  if (!fxOn) return;
+  const pr = renderer.getPixelRatio(), w = stage.clientWidth || 1, h = stage.clientHeight || 1;
+  composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(w * pr, h * pr, { type: THREE.HalfFloatType, samples: 4 }));
+  composer.addPass(new RenderPass(scene, camera));
+  bloom = new UnrealBloomPass(new THREE.Vector2(w, h), MOODS[mood].bloomS, 0.55, MOODS[mood].bloomT);
+  composer.addPass(bloom);
+  composer.addPass(new OutputPass());
 }
 
 // ---------- 相機:繞著目標旋轉的透視鏡頭,可拖曳、滾輪縮放、切換視角 ----------
 // 房間只有後牆(z=0)和左牆(x=0),所以鏡頭只待在房間開口這一側
+// 房間是封閉的,鏡頭待在室內:目標點往外退 dist 的距離,碰到牆就停在牆內
 const D2R = Math.PI / 180;
-const cam = { yaw: 45 * D2R, pitch: 30 * D2R, dist: 24, target: new THREE.Vector3(4, 1, 3) };
+const cam = { yaw: 30 * D2R, pitch: 15 * D2R, dist: 4, target: new THREE.Vector3(4, 1, 3) };
 const camGoal = { yaw: cam.yaw, pitch: cam.pitch, dist: cam.dist, target: cam.target.clone() };
 let view = store.get('yoyo_view') || 'desk', autoIdx = 0, autoAt = 0, activeView = 'room';
 const myPos = () => { const p = players.get(me); return p ? new THREE.Vector3(p.x, 0, p.y) : new THREE.Vector3(COLS / 2, 0, ROWS / 2); };
 const VIEWS = {
-  room: { yaw: 45, pitch: 27, dist: () => roomDist, target: () => new THREE.Vector3(COLS / 2 - 0.3, 1.2, ROWS / 2 - 0.3) },
-  desk: { yaw: 22, pitch: 11, dist: () => 5.6 * Math.max(1, 1.25 / camera.aspect), target: () => myPos().add(new THREE.Vector3(camera.aspect < 1 ? -0.3 : 0, camera.aspect < 1 ? 0.4 : 1.05, 0.2)) },
-  side: { yaw: 68, pitch: 18, dist: () => 11, target: () => myPos().add(new THREE.Vector3(-0.4, 0.95, 0)) },
+  room: { yaw: 50, pitch: 20, dist: () => 20, target: () => new THREE.Vector3(COLS * 0.4, 1.0, ROWS * 0.36) },
+  // 坐著時從正前方看;站著時人靠近房門那側,改從側邊看才退得夠遠
+  desk: { yaw: () => (players.get(me)?.seat ? 20 : 64), pitch: 8, dist: () => 3.3, target: () => myPos().add(new THREE.Vector3(0, 1.08, 0.15)) },
+  side: { yaw: 66, pitch: 12, dist: () => 3.8, target: () => myPos().add(new THREE.Vector3(-0.2, 1.0, 0)) },
 };
 const AUTO = ['desk', 'room', 'side'];
-let roomDist = 24;
 function applyView(name) {
   activeView = name;
   const v = VIEWS[name];
-  Object.assign(camGoal, { yaw: v.yaw * D2R, pitch: v.pitch * D2R, dist: v.dist() });
+  Object.assign(camGoal, { yaw: (typeof v.yaw === 'function' ? v.yaw() : v.yaw) * D2R, pitch: v.pitch * D2R, dist: v.dist() });
+  cam.yaw = ((cam.yaw - camGoal.yaw + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI + camGoal.yaw; // 走最短的方向轉過去
 }
 function setView(name) {
   view = VIEWS[name] || name === 'auto' ? name : 'desk';
@@ -873,31 +861,38 @@ function setView(name) {
   applyView(view === 'auto' ? AUTO[autoIdx % AUTO.length] : view);
 }
 $('#views').addEventListener('click', (ev) => { const b = ev.target.closest('button'); if (b) setView(b.dataset.view); });
+const camDir = new THREE.Vector3();
+let wasSeated = false;
 function updateCamera(dt, t) {
   if (view === 'auto' && t - autoAt > 14000) { autoAt = t; applyView(AUTO[++autoIdx % AUTO.length]); }
+  const seated = !!players.get(me)?.seat;
+  if (seated !== wasSeated) { wasSeated = seated; if (activeView === 'desk') applyView('desk'); } // 坐下或站起來時鏡頭跟著換位置
   camGoal.target.copy(VIEWS[activeView].target());
   const k = 1 - Math.exp(-dt * 3.2);
   cam.yaw += (camGoal.yaw - cam.yaw) * k; cam.pitch += (camGoal.pitch - cam.pitch) * k; cam.dist += (camGoal.dist - cam.dist) * k;
   cam.target.lerp(camGoal.target, k);
   const cp = Math.cos(cam.pitch);
-  camera.position.set(cam.target.x + Math.sin(cam.yaw) * cp * cam.dist, cam.target.y + Math.sin(cam.pitch) * cam.dist, cam.target.z + Math.cos(cam.yaw) * cp * cam.dist);
-  camera.lookAt(cam.target);
+  camDir.set(Math.sin(cam.yaw) * cp, Math.sin(cam.pitch), Math.cos(cam.yaw) * cp);
+  // 沿著視線往後退,最遠退到離牆、地板、天花板一小段距離
+  const m = 0.28, T = cam.target;
+  let d = cam.dist;
+  const lim = (p, v, lo, hi) => { if (v > 1e-4) d = Math.min(d, (hi - p) / v); else if (v < -1e-4) d = Math.min(d, (lo - p) / v); };
+  lim(T.x, camDir.x, m, COLS - m); lim(T.y, camDir.y, 0.25, WALLH - 0.2); lim(T.z, camDir.z, m, ROWS - m);
+  camera.position.copy(T).addScaledVector(camDir, Math.max(0.4, d));
+  camera.lookAt(T);
   camera.updateMatrixWorld();
 }
 function orbit(dx, dy) {
-  camGoal.yaw = Math.min(86 * D2R, Math.max(4 * D2R, camGoal.yaw - dx * 0.006));
-  camGoal.pitch = Math.min(62 * D2R, Math.max(5 * D2R, camGoal.pitch + dy * 0.005));
+  camGoal.yaw -= dx * 0.006;
+  camGoal.pitch = Math.min(70 * D2R, Math.max(-12 * D2R, camGoal.pitch + dy * 0.005));
 }
-function zoom(f) { camGoal.dist = Math.min(roomDist * 1.25, Math.max(4.5, camGoal.dist * f)); }
+function zoom(f) { camGoal.dist = Math.min(20, Math.max(1.4, camGoal.dist * f)); }
 function fitCamera() {
   const w = stage.clientWidth || 1, h = stage.clientHeight || 1;
   renderer.setSize(w, h, false);
-  post?.resize(w, h);
-  camera.aspect = w / h; camera.updateProjectionMatrix();
-  // 全景視角:找出剛好看得到整個房間的距離
-  const tv = Math.tan((camera.fov / 2) * D2R), r = Math.hypot(COLS, ROWS, WALLH) / 2;
-  roomDist = (r / Math.min(tv, tv * camera.aspect)) * 0.86;
-  if (activeView === 'room') camGoal.dist = roomDist;
+  camera.aspect = w / h; camera.fov = camera.aspect < 1 ? 68 : 50; // 直式螢幕用廣一點的視角
+  camera.updateProjectionMatrix();
+  if (composer) { composer.setSize(w, h); bloom.resolution.set(w, h); } else setupFx();
 }
 new ResizeObserver(fitCamera).observe(stage);
 
@@ -1047,7 +1042,7 @@ function frame(t) {
       else { ghostPad.rotation.set(-Math.PI / 2, 0, 0); ghostPad.scale.set(gw, gh, 1); ghostPad.position.set(hover.x + gw / 2, 0.05, hover.y + gh / 2); }
     }
   }
-  if (post) post.render(); else renderer.render(scene, camera);
+  if (composer) composer.render(); else renderer.render(scene, camera);
   if (photoJob && t >= photoJob.at) { const j = photoJob; photoJob = null; composePhoto(j); }
   tickTimer(t);
 }
@@ -1060,7 +1055,7 @@ function pick(ev) { // → {wall, x, z}:地板座標,或牆面上的 x
   ndc.set(((ev.clientX - r.left) / r.width) * 2 - 1, -((ev.clientY - r.top) / r.height) * 2 + 1);
   ray.setFromCamera(ndc, camera);
   const f = ray.ray.intersectPlane(FLOOR_PLANE, new THREE.Vector3());
-  if (f && f.x >= 0 && f.z >= 0) return { wall: false, x: f.x, z: f.z };
+  if (f && f.x >= 0 && f.z >= 0 && f.x <= COLS && f.z <= ROWS) return { wall: false, x: f.x, z: f.z };
   const w = ray.ray.intersectPlane(WALL_PLANE, new THREE.Vector3());
   if (w && w.x >= 0 && w.x <= COLS && w.y >= 0 && w.y <= WALLH + 0.3) return { wall: true, x: w.x, z: 0 };
   return null;
@@ -1173,6 +1168,7 @@ function tickTimer(t) {
 }
 function refreshTimer() {
   const f = myFocus();
+  if (!!f !== document.body.classList.contains('focusing')) setMin($('#timerCard'), !!f); // 開始專注時自動收小,結束時展開
   document.body.classList.toggle('focusing', !!f);
   const lab = $('#timerLabel');
   lab.classList.toggle('break', f?.phase === 'break');
@@ -1219,6 +1215,25 @@ $('#statusInput').addEventListener('input', (ev) => {
 });
 $('#poses').addEventListener('click', (ev) => { const b = ev.target.closest('button'); if (b) { setPose(+b.dataset.pose); send({ t: 'status', pose: +b.dataset.pose }); } });
 function setPose(i) { document.querySelectorAll('#poses button').forEach((x) => x.classList.toggle('on', +x.dataset.pose === i)); }
+
+// ---------- 小卡片收合:專注時只留時間,房間才是主角 ----------
+function setMin(card, on, remember) {
+  card.classList.toggle('min', on);
+  card.querySelector('.cardTog')?.setAttribute('aria-expanded', String(!on));
+  if (remember) store.set('yoyo_min_' + card.id, on ? '1' : '0');
+}
+for (const card of document.querySelectorAll('.card')) {
+  const saved = store.get('yoyo_min_' + card.id);
+  setMin(card, saved ? saved === '1' : card.id !== 'timerCard' || innerWidth < 860); // 待辦和環境音預設收起來;手機上計時器也先收小
+  card.querySelector('.cardTog').addEventListener('click', () => setMin(card, !card.classList.contains('min'), true));
+}
+// 左下角的日期與時間
+function tickClock() {
+  const d = new Date();
+  $('#clockDate').textContent = `${d.getMonth() + 1} 月 ${d.getDate()} 日 週${WEEKDAYS[d.getDay()]}`;
+  $('#clockTime').textContent = `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+setInterval(tickClock, 5000);
 
 // ---------- 待辦清單(存在伺服器的個人存檔裡) ----------
 let todos = [];
@@ -1551,6 +1566,8 @@ $('#moods').addEventListener('click', (ev) => {
   if (applyMood()) rebuildRoom();
 });
 refreshMoodUI();
+$('#fxToggle').checked = fxOn;
+$('#fxToggle').addEventListener('change', (ev) => { fxOn = ev.target.checked; store.set('yoyo_fx', fxOn ? '1' : '0'); setupFx(); });
 
 $('#saveCode').value = token;
 $('#showCode').addEventListener('click', (ev) => {
@@ -1653,5 +1670,6 @@ function chime() {
 
 window.__booted = true;
 connect();
+tickClock();
 requestAnimationFrame(frame);
 })();

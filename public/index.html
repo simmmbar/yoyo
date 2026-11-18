@@ -32,6 +32,7 @@
 
 <div class="widgets">
   <section class="card" id="timerCard">
+    <button class="cardTog" aria-label="收合或展開計時器" aria-expanded="true"><span class="ttl">計時器</span><i></i></button>
     <div class="seg" id="modes">
       <button data-mode="pomo" class="on">番茄鐘</button>
       <button data-mode="down">倒數</button>
@@ -66,6 +67,7 @@
   </section>
 
   <section class="card" id="todoCard">
+    <button class="cardTog" aria-label="收合或展開待辦與習慣"><span class="ttl">待辦與習慣</span><i></i></button>
     <div class="seg small" id="listTabs">
       <button data-list="todo" class="on">待辦 <b id="todoCount"></b></button>
       <button data-list="habit">每日習慣 <b id="habitCount"></b></button>
@@ -81,10 +83,12 @@
   </section>
 
   <section class="card" id="musicCard">
-    <div class="cardHead static"><span>環境音</span></div>
+    <button class="cardTog" aria-label="收合或展開環境音"><span class="ttl">環境音</span><i></i></button>
     <div id="sounds"></div>
   </section>
 </div>
+
+<div id="clock"><span id="clockDate"></span><b id="clockTime"></b></div>
 
 <div id="partyBar" hidden>
   <span id="partyText"></span>
@@ -172,6 +176,7 @@
       <button data-mood="night">夜晚</button>
     </div>
     <p class="hint">自動會依你當地的時間切換。只影響你自己看到的畫面。</p>
+    <label class="check"><input type="checkbox" id="fxToggle"> 柔光效果(關閉比較省電、比較順)</label>
     <h3>雲端存檔</h3>
     <p class="hint">進度會自動存在伺服器。在別的裝置輸入你的存檔碼,就能接著玩。存檔碼等同密碼,請不要給別人。</p>
     <div class="row">
