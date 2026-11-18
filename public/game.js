@@ -209,9 +209,9 @@ const LIGHTS = addLights(scene, true);
 
 // 光線氛圍:白天 / 黃昏 / 夜晚(自動 = 依你當地的時間)
 const MOODS = {
-  day:   { sky: 0xffeedd, ground: 0x8f7fc0, hemi: 0.95, sun: 0xffdcb4, sunI: 2.7,  lamp: 1.4, room: 0, exp: 1.12, bloomT: 1.7, bloomS: 0.2 },
-  dusk:  { sky: 0xffd2b4, ground: 0x7a659e, hemi: 0.8,  sun: 0xff9a62, sunI: 1.6,  lamp: 2.4, room: 4, exp: 1.08, bloomT: 1.7, bloomS: 0.24 },
-  night: { sky: 0xd8d2ee, ground: 0x554a70, hemi: 0.72, sun: 0xb4c0f4, sunI: 0.35, lamp: 3.2, room: 9, exp: 1.04, bloomT: 1.7, bloomS: 0.28 },
+  day:   { sky: 0xffeedd, ground: 0x8f7fc0, hemi: 0.9,  sun: 0xffdcb4, sunI: 2.2,  lamp: 0.45, room: 0, exp: 1.04, bloomT: 1.5,  bloomS: 0.1 },
+  dusk:  { sky: 0xffd2b4, ground: 0x7a659e, hemi: 0.78, sun: 0xff9a62, sunI: 1.5,  lamp: 0.9,  room: 3, exp: 1.05, bloomT: 1.3,  bloomS: 0.16 },
+  night: { sky: 0xd8d2ee, ground: 0x554a70, hemi: 0.7,  sun: 0xb4c0f4, sunI: 0.35, lamp: 1.25, room: 6, exp: 1.04, bloomT: 1.12, bloomS: 0.22 },
 };
 let moodPref = store.get('yoyo_mood') || 'auto', mood = 'day';
 const autoMood = () => { const h = new Date().getHours() + new Date().getMinutes() / 60; return h < 6 || h >= 19 ? 'night' : h >= 17 || h < 7.5 ? 'dusk' : 'day'; };
@@ -288,8 +288,8 @@ const ITEMS = {
   rack: { m: 'rack' }, box: { m: 'box' },
   bed: { m: 'bed', surf: 0.53 }, dbed: { m: 'bed_double', surf: 0.53 }, ksofa: { m: 'sofa', back: 1 }, lchair: { m: 'armchair', seat: 0.42 }, ottoman: { m: 'ottoman', seat: 0.4 },
   tv2: { m: 'tv', back: 1, glow: [1, 0.9, 1.0] }, fridge: { m: 'fridge', back: 1 }, spk: { m: 'speaker' }, arcade: { m: 'arcade', glow: [0.5, 1.2, 1.0] }, vending: { m: 'vending', back: 1 },
-  flamp: { m: 'floorlamp', lamp: 1.6 }, bigplant: { m: 'plant_big' }, plant: { m: 'plant' }, bin: { m: 'bin' }, cat: { m: 'cat' },
-  monitor: { m: 'monitor' }, tlaptop: { m: 'laptop' }, tlamp: { m: 'lamp', lamp: 0.36 }, tbooks: { m: 'books' }, tplant: { m: 'plant_small' }, tplant2: { m: 'succulent' },
+  flamp: { m: 'floorlamp', lamp: 1.75 }, bigplant: { m: 'plant_big' }, plant: { m: 'plant' }, bin: { m: 'bin' }, cat: { m: 'cat' },
+  monitor: { m: 'monitor' }, tlaptop: { m: 'laptop' }, tlamp: { m: 'lamp', lamp: 0.62 }, tbooks: { m: 'books' }, tplant: { m: 'plant_small' }, tplant2: { m: 'succulent' },
   radio: { m: 'radio' }, brew: { m: 'teaset' },
   window: { m: 'window' }, painting: { m: 'frame' }, poster: { m: 'poster' }, clock: { m: 'clock' }, shelf: { m: 'wallshelf' }, wlamp: { m: 'walllamp', lamp: 1.95 }, mirror: { m: 'mirror' },
 };
@@ -357,15 +357,15 @@ function toonMat(name, hex) {
     else if (TEX[name]) { const t = TEX[name]().clone(); t.flipY = false; t.needsUpdate = true; m = new THREE.MeshBasicMaterial({ map: t, toneMapped: false }); }
     else if (name === 'mirror') m = new THREE.MeshBasicMaterial({ color: '#dbeef6' });
     else {
-      m = new THREE.MeshToonMaterial({ color: hex, gradientMap: toonRamp });
-      if (name === 'shade') { m.emissive.set('#ffc98a'); m.emissiveIntensity = 0.22; }
+      // 燈罩自己發亮但不受其他燈影響,亮度固定,晚上才會有一點光暈
+      m = name === 'shade' ? new THREE.MeshBasicMaterial({ color: new THREE.Color('#fff0d0').multiplyScalar(1.22) }) : new THREE.MeshToonMaterial({ color: hex, gradientMap: toonRamp });
     }
     m.name = name;
     toonCache.set(key, m);
   }
   return toonCache.get(key);
 }
-const flat = (name) => name === 'outline' || name === 'mirror' || !!TEX[name]; // 不受光、也不投影的材質
+const flat = (name) => name === 'outline' || name === 'mirror' || name === 'shade' || !!TEX[name]; // 不受光、也不投影的材質
 const modelsReady = Promise.all(SFILES.map((n) => new GLTFLoader().loadAsync(`/assets/studio/${n}.glb`).then((g) => {
   g.scene.traverse((o) => {
     if (!o.isMesh) return;
@@ -683,54 +683,83 @@ const tmpV2 = new THREE.Vector3();
 // ---------- 房間 ----------
 const roomGroup = new THREE.Group(), itemsGroup = new THREE.Group(), playersGroup = new THREE.Group();
 scene.add(roomGroup, itemsGroup, playersGroup);
-let anims = [], wallMats = null, floorMesh = null, gridLines = null, wallLines = null;
+let anims = [], wallPlanes = [], floorMesh = null, gridLines = null, wallLines = null;
 
+// 牆面與地板:畫出來的壁紙、腰牆、踢腳板、木地板,線條和家具的描邊同色
+const LINE = '#5b4638'; // 線條顏色,和家具描邊相同
+const mix = (a, b, t) => '#' + new THREE.Color(a).lerp(new THREE.Color(b), t).getHexString();
+const frac = (n) => { const v = Math.sin(n * 12.9898) * 43758.5453; return v - Math.floor(v); }; // 固定的偽亂數
+const wallTexCache = new Map();
+function wallTex(i, width) {
+  const [wc, wt] = WALLS[i] || WALLS[0], PX = 256, PY = 252, H = Math.round(WALLH * PY); // 一張圖 = 寬 2 公尺 × 整面牆高
+  const base = canvasTex('wall' + i, 512, H, (c, w, h) => {
+    const y = (m) => (WALLH - m) * PY, line = (m, a = 0.55, lw = 2.5) => { c.globalAlpha = a; c.fillStyle = LINE; c.fillRect(0, y(m) - lw / 2, w, lw); c.globalAlpha = 1; };
+    c.fillStyle = wc; c.fillRect(0, 0, w, h);
+    const lite = mix(wc, '#ffffff', 0.35), deep = mix(wc, LINE, 0.1);
+    if (i % 3 === 0) { c.fillStyle = lite; for (let r = 0; r < 12; r++) for (let k = 0; k < 8; k++) { c.beginPath(); c.arc(k * 64 + (r % 2) * 32 + 16, r * 46 + 20, 4, 0, 7); c.fill(); } }          // 小圓點
+    if (i % 3 === 1) { c.fillStyle = lite; for (let k = 0; k < 8; k++) c.fillRect(k * 64 + 8, 0, 22, h); c.fillStyle = deep; for (let k = 0; k < 8; k++) c.fillRect(k * 64 + 44, 0, 3, h); } // 直條紋
+    if (i % 3 === 2) { c.strokeStyle = lite; c.lineWidth = 3; for (let r = 0; r < 10; r++) for (let k = 0; k < 4; k++) { const cx = k * 128 + (r % 2) * 64 + 32, cy = r * 58 + 26; c.beginPath(); c.moveTo(cx - 8, cy); c.lineTo(cx + 8, cy); c.moveTo(cx, cy - 8); c.lineTo(cx, cy + 8); c.stroke(); } } // 小十字
+    // 腰牆(直板)、腰線、踢腳板、天花板線板
+    c.fillStyle = wt; c.fillRect(0, y(0.98), w, h);
+    c.globalAlpha = 0.16; c.fillStyle = LINE; for (let k = 0; k < 8; k++) c.fillRect(k * 64 + 31, y(0.9), 2.5, y(0.14) - y(0.9)); c.globalAlpha = 1;
+    c.fillStyle = mix(wt, '#ffffff', 0.5); c.fillRect(0, y(1.04), w, y(0.96) - y(1.04)); line(1.04); line(0.96, 0.4);
+    c.fillStyle = mix(wt, '#ffffff', 0.5); c.fillRect(0, y(0.14), w, h); line(0.14, 0.5); line(0.008, 0.7, 4);
+    c.fillStyle = mix(wt, '#ffffff', 0.5); c.fillRect(0, 0, w, y(WALLH - 0.09)); line(WALLH - 0.09, 0.45); line(WALLH - 0.008, 0.6, 4);
+  });
+  const key = i + ':' + width;
+  if (!wallTexCache.has(key)) { const t = base.clone(); t.wrapS = THREE.RepeatWrapping; t.repeat.set(width / 2, 1); t.needsUpdate = true; wallTexCache.set(key, t); }
+  return wallTexCache.get(key);
+}
 function floorTex(i) {
   const [a, b] = FLOORS[i] || FLOORS[0];
-  const t = canvasTex('floor' + i, 512, 512, (c) => {
-    c.fillStyle = a; c.fillRect(0, 0, 512, 512);
-    for (let r = 0; r < 8; r++) {
-      const off = (r % 2) * 128 + ((r * 53) % 40);
-      for (let k = -1; k < 3; k++) {
-        c.globalAlpha = 0.25 + ((r * 7 + k * 3 + 9) % 5) * 0.12;
-        c.fillStyle = b; c.fillRect(off + k * 256 + 2, r * 64 + 2, 252, 60);
+  const t = canvasTex('floor' + i, 512, 512, (c, w, h) => { // 一張圖 = 2 × 2 公尺
+    c.fillStyle = a; c.fillRect(0, 0, w, h);
+    if (i <= 2) {                         // 木地板:一條條長木板,深淺略有不同,接縫錯開
+      for (let r = 0; r < 8; r++) {
+        const off = Math.round(frac(r + i * 9) * 200);
+        for (let k = -1; k < 3; k++) {
+          const x = off + k * 256, tone = frac(r * 7 + k * 13 + i);
+          c.fillStyle = mix(a, b, tone); c.fillRect(x, r * 64, 256, 64);
+          c.globalAlpha = 0.1; c.fillStyle = LINE; for (let g = 0; g < 3; g++) c.fillRect(x + 20 + frac(r * 3 + k * 5 + g) * 150, r * 64 + 14 + g * 17, 50 + frac(g + r) * 60, 1.5); c.globalAlpha = 1;
+          c.globalAlpha = 0.4; c.fillStyle = LINE; c.fillRect(x, r * 64, 2.5, 64); c.globalAlpha = 1;
+        }
+        c.globalAlpha = 0.4; c.fillStyle = LINE; c.fillRect(0, r * 64, w, 2.5); c.globalAlpha = 1;
       }
+    } else if (i === 3) {                 // 方磚:兩色交錯
+      for (let r = 0; r < 4; r++) for (let k = 0; k < 4; k++) { c.fillStyle = (r + k) % 2 ? a : b; c.fillRect(k * 128, r * 128, 128, 128); }
+      c.globalAlpha = 0.3; c.fillStyle = LINE; for (let k = 0; k < 4; k++) { c.fillRect(k * 128, 0, 2.5, h); c.fillRect(0, k * 128, w, 2.5); } c.globalAlpha = 1;
+    } else {                              // 地毯:細小的織紋
+      for (let n = 0; n < 1400; n++) { c.fillStyle = frac(n) > 0.5 ? b : mix(a, '#ffffff', 0.3); c.globalAlpha = 0.5; c.fillRect(frac(n * 1.7) * w, frac(n * 2.3) * h, 5, 2); }
+      c.globalAlpha = 1;
     }
-    c.globalAlpha = 0.16; c.fillStyle = '#3a2218';
-    for (let r = 0; r < 8; r++) { c.fillRect(0, r * 64, 512, 2); for (let k = -1; k < 3; k++) c.fillRect((r % 2) * 128 + ((r * 53) % 40) + k * 256, r * 64, 2, 64); }
   });
-  t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(COLS / 3, ROWS / 3);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(COLS / 2, ROWS / 2);
   return t;
 }
 function buildShell() {
-  roomGroup.clear();
-  const wm = new THREE.MeshStandardMaterial({ roughness: 0.95 }), tm = new THREE.MeshStandardMaterial({ roughness: 0.9 });
-  wallMats = [wm, tm];
-  const th = 0.28;
-  const add = (o, cast = false) => { o.castShadow = cast; roomGroup.add(o); return o; };
-  add(box(COLS + th, WALLH, th, wm, COLS / 2 - th / 2, 0, -th / 2, 0.03));
-  add(box(th, WALLH, ROWS, wm, -th / 2, 0, ROWS / 2, 0.03));
-  add(box(COLS, 0.22, 0.05, tm, COLS / 2, 0, 0.025, 0.01));
-  add(box(0.05, 0.22, ROWS, tm, 0.025, 0, ROWS / 2, 0.01));
-  add(box(COLS + th, 0.07, th + 0.06, tm, COLS / 2 - th / 2, WALLH, -th / 2 + 0.03, 0.02));
-  add(box(th + 0.06, 0.07, ROWS, tm, -th / 2 + 0.03, WALLH, ROWS / 2, 0.02));
-  // 房間是封閉的:前牆、右牆和天花板(鏡頭在室內,所以看不到外側)。它們不擋陽光,室內才不會全黑
-  add(box(COLS + th * 2, WALLH, th, wm, COLS / 2, 0, ROWS + th / 2, 0.03));
-  add(box(th, WALLH, ROWS, wm, COLS + th / 2, 0, ROWS / 2, 0.03));
-  add(box(COLS, 0.22, 0.05, tm, COLS / 2, 0, ROWS - 0.025, 0.01));
-  add(box(0.05, 0.22, ROWS, tm, COLS - 0.025, 0, ROWS / 2, 0.01));
-  const ceil = new THREE.Mesh(new THREE.PlaneGeometry(COLS + th * 2, ROWS + th * 2), new THREE.MeshStandardMaterial({ color: '#fbf6ec', roughness: 1, emissive: '#fbf6ec', emissiveIntensity: 0.22 }));
+  roomGroup.clear(); wallPlanes = [];
+  // 房間是封閉的,鏡頭在室內:四面牆各是一片朝內的平面,不擋陽光,室內才不會全黑
+  const wall = (width, x, z, ry) => {
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(width, WALLH), new THREE.MeshLambertMaterial({ emissive: '#ffffff', emissiveIntensity: 0.22 }));
+    m.position.set(x, WALLH / 2, z); m.rotation.y = ry; m.receiveShadow = true; m.userData.width = width;
+    roomGroup.add(m); wallPlanes.push(m);
+  };
+  wall(COLS, COLS / 2, 0, 0); wall(ROWS, 0, ROWS / 2, Math.PI / 2); wall(COLS, COLS / 2, ROWS, Math.PI); wall(ROWS, COLS, ROWS / 2, -Math.PI / 2);
+  const ink = new THREE.MeshBasicMaterial({ color: LINE });
+  for (const [x, z] of [[0, 0], [COLS, 0], [0, ROWS], [COLS, ROWS]]) { // 牆角的線
+    const l = new THREE.Mesh(geo('cornerLine', () => new THREE.BoxGeometry(0.02, WALLH, 0.02)), ink);
+    l.position.set(x, WALLH / 2, z); roomGroup.add(l);
+  }
+  const ceil = new THREE.Mesh(new THREE.PlaneGeometry(COLS, ROWS), new THREE.MeshLambertMaterial({ color: '#fbf6ec', emissive: '#fbf6ec', emissiveIntensity: 0.25 }));
   ceil.rotation.x = Math.PI / 2; ceil.position.set(COLS / 2, WALLH, ROWS / 2);
   roomGroup.add(ceil);
-  // 房門(在前牆上,純裝飾)
-  sput(roomGroup, 'door', { x: COLS - 1.3, z: ROWS, ry: Math.PI });
-  add(box(COLS + th * 2, 0.45, ROWS + th * 2, tm, COLS / 2, -0.451, ROWS / 2, 0.06));
-  floorMesh = new THREE.Mesh(new THREE.PlaneGeometry(COLS, ROWS), new THREE.MeshStandardMaterial({ roughness: 0.75 }));
+  sput(roomGroup, 'door', { x: COLS - 1.3, z: ROWS, ry: Math.PI }); // 房門(在前牆上,純裝飾)
+  floorMesh = new THREE.Mesh(new THREE.PlaneGeometry(COLS, ROWS), new THREE.MeshLambertMaterial({ emissive: '#ffffff', emissiveIntensity: 0.1 }));
   floorMesh.rotation.x = -Math.PI / 2; floorMesh.position.set(COLS / 2, 0, ROWS / 2); floorMesh.receiveShadow = true;
   roomGroup.add(floorMesh);
   const pts = [];
-  for (let q = 0; q <= COLS; q++) pts.push(q, 0.012, 0, q, 0.012, ROWS);
-  for (let r = 0; r <= ROWS; r++) pts.push(0, 0.012, r, COLS, 0.012, r);
+  for (let q = 0; q <= COLS; q++) pts.push(q, 0.02, 0, q, 0.02, ROWS);
+  for (let r = 0; r <= ROWS; r++) pts.push(0, 0.02, r, COLS, 0.02, r);
   const wpts = [];
   for (let q = 0; q <= COLS; q++) wpts.push(q, 0.25, 0.012, q, WALLH, 0.012);
   const lines = (arr) => {
@@ -755,9 +784,9 @@ function wrapItem(inner, type, face) {
 function rebuildRoom() {
   if (!room || !modelsLoaded) return;
   if (!floorMesh) buildShell();
-  const [wc, wt] = WALLS[room.wall] || WALLS[0];
-  wallMats[0].color.set(wc); wallMats[1].color.set(wt);
-  floorMesh.material.map = floorTex(room.floor); floorMesh.material.needsUpdate = true;
+  // 牆和地板帶一點自發光,背光的那幾面才不會灰暗
+  for (const w of wallPlanes) { w.material.map = w.material.emissiveMap = wallTex(room.wall, w.userData.width); w.material.needsUpdate = true; }
+  floorMesh.material.map = floorMesh.material.emissiveMap = floorTex(room.floor); floorMesh.material.needsUpdate = true;
   itemsGroup.clear(); anims = [];
   computeSeats(); assignSeats();
   let lamps = 0, glows = 0;
@@ -774,7 +803,7 @@ function rebuildRoom() {
     const st = seats.find((q) => q.id === it.id);
     if (st) { face = st.face; if (st.desk != null) inner.position.z += ITEMS[it.type].pull || CHAIR_FWD; } // 椅子自動轉向它面對的桌子,並往桌子拉近
     if (inner.userData.lampAt && lamps++ < 5) {
-      const l = new THREE.PointLight(0xffc27a, MOODS[mood].lamp, 4.5, 1.6); l.position.copy(inner.userData.lampAt); inner.add(l);
+      const l = new THREE.PointLight(0xffc27a, MOODS[mood].lamp, 4.2, 1.0); // 衰減放緩,燈旁邊才不會整片過曝 l.position.copy(inner.userData.lampAt); inner.add(l);
       lampLights.push(l);
     }
     if (inner.userData.neonAt && glows++ < 3) { const l = new THREE.PointLight(0xff6fa8, 1.6, 3.5, 1.8); l.position.copy(inner.userData.neonAt); inner.add(l); }
