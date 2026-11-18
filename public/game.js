@@ -209,13 +209,20 @@ const LIGHTS = addLights(scene, true);
 
 // 光線氛圍:白天 / 黃昏 / 夜晚(自動 = 依你當地的時間)
 const MOODS = {
-  day:   { sky: 0xffeedd, ground: 0x8f7fc0, hemi: 0.9,  sun: 0xffdcb4, sunI: 2.2,  lamp: 0.45, room: 0, exp: 1.04, bloomT: 1.5,  bloomS: 0.1 },
-  dusk:  { sky: 0xffd2b4, ground: 0x7a659e, hemi: 0.78, sun: 0xff9a62, sunI: 1.5,  lamp: 0.9,  room: 3, exp: 1.05, bloomT: 1.3,  bloomS: 0.16 },
-  night: { sky: 0xd8d2ee, ground: 0x554a70, hemi: 0.7,  sun: 0xb4c0f4, sunI: 0.35, lamp: 1.25, room: 6, exp: 1.04, bloomT: 1.12, bloomS: 0.22 },
+  // lamp 燈具、glow 螢幕、neon 霓虹燈、beam 從窗戶照進來的光(顏色與強度)、wallE/floorE/ceilE 牆面、地板、天花板的自發光
+  day:   { sky: 0xffeedd, ground: 0x8f7fc0, hemi: 0.9,  sun: 0xffdcb4, sunI: 2.2,  lamp: 0.3,  room: 0,   exp: 1.04, bloomT: 1.5,  bloomS: 0.1,
+           glow: 0.06, neon: 1.0, beam: [0xfff0d0, 2.5], wallE: 0.22, floorE: 0.1,  ceilE: 0.25, vig: 0 },
+  dusk:  { sky: 0xffd2b4, ground: 0x7a659e, hemi: 0.78, sun: 0xff9a62, sunI: 1.5,  lamp: 0.7,  room: 3,   exp: 1.05, bloomT: 1.3,  bloomS: 0.16,
+           glow: 0.16, neon: 1.6, beam: [0xffb07a, 5],   wallE: 0.16, floorE: 0.08, ceilE: 0.16, vig: 0.25 },
+  // 夜晚:大燈關掉,環境光壓暗偏藍,靠檯燈、螢幕、霓虹燈和月光照明
+  night: { sky: 0x7486d8, ground: 0x1e1c3c, hemi: 0.36, sun: 0x8fa4ff, sunI: 0.22, lamp: 1.5,  room: 0.5, exp: 1.0,  bloomT: 1.1,  bloomS: 0.26,
+           glow: 0.26, neon: 1.5, beam: [0x9fb6ff, 9],   wallE: 0.05, floorE: 0.03, ceilE: 0.03, vig: 0.6 },
 };
 let moodPref = store.get('yoyo_mood') || 'auto', mood = 'day';
 const autoMood = () => { const h = new Date().getHours() + new Date().getMinutes() / 60; return h < 6 || h >= 19 ? 'night' : h >= 17 || h < 7.5 ? 'dusk' : 'day'; };
-let lampLights = [];
+let lampLights = [], glowLights = [], neonLights = [], beamLights = [], ceilMesh = null;
+// 每盞燈的亮度:燈越多,每盞越暗,整間房才不會被照得像白天
+const lampLevel = () => MOODS[mood].lamp / Math.max(1, lampLights.length * 0.62);
 function applyMood() {
   const next = MOODS[moodPref] ? moodPref : autoMood(), changed = next !== mood;
   mood = next;
@@ -225,7 +232,14 @@ function applyMood() {
   LIGHTS.roomLight.intensity = m.room;
   renderer.toneMappingExposure = m.exp;
   if (bloom) { bloom.threshold = m.bloomT; bloom.strength = m.bloomS; }
-  for (const l of lampLights) l.intensity = m.lamp;
+  for (const l of lampLights) l.intensity = lampLevel() * l.userData.k;
+  for (const l of glowLights) l.intensity = m.glow;
+  for (const l of neonLights) l.intensity = m.neon;
+  for (const l of beamLights) { l.color.set(m.beam[0]); l.intensity = m.beam[1]; }
+  for (const w of wallPlanes) w.material.emissiveIntensity = m.wallE;
+  if (floorMesh) floorMesh.material.emissiveIntensity = m.floorE;
+  if (ceilMesh) ceilMesh.material.emissiveIntensity = m.ceilE;
+  document.documentElement.style.setProperty('--vig', m.vig);
   document.body.dataset.mood = mood;
   return changed;
 }
@@ -289,7 +303,7 @@ const ITEMS = {
   bed: { m: 'bed', surf: 0.53 }, dbed: { m: 'bed_double', surf: 0.53 }, ksofa: { m: 'sofa', back: 1 }, lchair: { m: 'armchair', seat: 0.42 }, ottoman: { m: 'ottoman', seat: 0.4 },
   tv2: { m: 'tv', back: 1, glow: [1, 0.9, 1.0] }, fridge: { m: 'fridge', back: 1 }, spk: { m: 'speaker' }, arcade: { m: 'arcade', glow: [0.5, 1.2, 1.0] }, vending: { m: 'vending', back: 1 },
   flamp: { m: 'floorlamp', lamp: 1.75 }, bigplant: { m: 'plant_big' }, plant: { m: 'plant' }, bin: { m: 'bin' }, cat: { m: 'cat' },
-  monitor: { m: 'monitor' }, tlaptop: { m: 'laptop' }, tlamp: { m: 'lamp', lamp: 0.62 }, tbooks: { m: 'books' }, tplant: { m: 'plant_small' }, tplant2: { m: 'succulent' },
+  monitor: { m: 'monitor', glow: [0.5, 0.55, 1.0] }, tlaptop: { m: 'laptop', glow: [0.5, 0.5, 0.95] }, tlamp: { m: 'lamp', lamp: 0.62 }, tbooks: { m: 'books' }, tplant: { m: 'plant_small' }, tplant2: { m: 'succulent' },
   radio: { m: 'radio' }, brew: { m: 'teaset' },
   window: { m: 'window' }, painting: { m: 'frame' }, poster: { m: 'poster' }, clock: { m: 'clock' }, shelf: { m: 'wallshelf' }, wlamp: { m: 'walllamp', lamp: 1.95 }, mirror: { m: 'mirror' },
 };
@@ -425,7 +439,7 @@ function buildRug(g, type, o = {}) {
 
 const BUILD = {
   neon(g) {
-    const pink = mat('#ff7fb0', glow('#ff4f98', 5)), blue = mat('#9fe6ff', glow('#5fd0ff', 5));
+    const pink = mat('#ff7fb0', glow('#ff4f98', 2.6)), blue = mat('#9fe6ff', glow('#5fd0ff', 2.6));
     const arc = new THREE.Mesh(geo('neonArc', () => new THREE.TorusGeometry(0.3, 0.022, 10, 48, Math.PI * 1.25)), pink);
     arc.position.set(0.46, 2.05, 0.05); arc.rotation.z = Math.PI * 0.42;
     const arc2 = new THREE.Mesh(geo('neonArc2', () => new THREE.TorusGeometry(0.24, 0.02, 10, 40, Math.PI * 0.95)), pink);
@@ -752,7 +766,7 @@ function buildShell() {
   }
   const ceil = new THREE.Mesh(new THREE.PlaneGeometry(COLS, ROWS), new THREE.MeshLambertMaterial({ color: '#fbf6ec', emissive: '#fbf6ec', emissiveIntensity: 0.25 }));
   ceil.rotation.x = Math.PI / 2; ceil.position.set(COLS / 2, WALLH, ROWS / 2);
-  roomGroup.add(ceil);
+  roomGroup.add(ceil); ceilMesh = ceil;
   sput(roomGroup, 'door', { x: COLS - 1.3, z: ROWS, ry: Math.PI }); // 房門(在前牆上,純裝飾)
   floorMesh = new THREE.Mesh(new THREE.PlaneGeometry(COLS, ROWS), new THREE.MeshLambertMaterial({ emissive: '#ffffff', emissiveIntensity: 0.1 }));
   floorMesh.rotation.x = -Math.PI / 2; floorMesh.position.set(COLS / 2, 0, ROWS / 2); floorMesh.receiveShadow = true;
@@ -789,8 +803,8 @@ function rebuildRoom() {
   floorMesh.material.map = floorMesh.material.emissiveMap = floorTex(room.floor); floorMesh.material.needsUpdate = true;
   itemsGroup.clear(); anims = [];
   computeSeats(); assignSeats();
-  let lamps = 0, glows = 0;
-  lampLights = [];
+  let lamps = 0;
+  lampLights = []; glowLights = []; neonLights = []; beamLights = [];
   for (const it of room.items) {
     if (!CATALOG[it.type]) continue;
     let opt, face = rotOf(it.r) * Math.PI / 2;
@@ -803,13 +817,21 @@ function rebuildRoom() {
     const st = seats.find((q) => q.id === it.id);
     if (st) { face = st.face; if (st.desk != null) inner.position.z += ITEMS[it.type].pull || CHAIR_FWD; } // 椅子自動轉向它面對的桌子,並往桌子拉近
     if (inner.userData.lampAt && lamps++ < 5) {
-      const l = new THREE.PointLight(0xffc27a, MOODS[mood].lamp, 4.2, 1.0); // 衰減放緩,燈旁邊才不會整片過曝 l.position.copy(inner.userData.lampAt); inner.add(l);
+      // 衰減放緩,燈旁邊才不會整片過曝
+      const l = new THREE.PointLight(0xffb866, MOODS[mood].lamp, 4.2, 1.0);
+      l.position.copy(inner.userData.lampAt); inner.add(l);
+      l.userData.k = CATALOG[it.type].kind === 'top' ? 0.5 : 1; // 檯燈離桌面和人很近,亮度減半
       lampLights.push(l);
     }
-    if (inner.userData.neonAt && glows++ < 3) { const l = new THREE.PointLight(0xff6fa8, 1.6, 3.5, 1.8); l.position.copy(inner.userData.neonAt); inner.add(l); }
-    if (inner.userData.glowAt && glows++ < 3) { // 最多兩台電視會照亮房間
-      const l = new THREE.PointLight(0x7fc4f0, 2.5, 4.5, 1.6); l.position.copy(inner.userData.glowAt); inner.add(l);
-      inner.userData.glow = l;
+    if (inner.userData.neonAt && neonLights.length < 2) { const l = new THREE.PointLight(0xff6fa8, MOODS[mood].neon, 4, 1.4); l.position.copy(inner.userData.neonAt); inner.add(l); neonLights.push(l); }
+    if (inner.userData.glowAt && glowLights.length < 3) { // 螢幕的藍光(最多三個)
+      const l = new THREE.PointLight(0x8fc0ff, MOODS[mood].glow, 3.2, 1.2); l.position.copy(inner.userData.glowAt); inner.add(l);
+      glowLights.push(l);
+    }
+    if (it.type === 'window' && beamLights.length < 1) { // 從窗戶斜照進來的光:白天是陽光,夜晚是月光
+      const l = new THREE.SpotLight(MOODS[mood].beam[0], MOODS[mood].beam[1], 7, 0.62, 0.75, 1.0);
+      l.position.set(1, 2.1, 0.15); l.target.position.set(1.5, 0, 3.0);
+      inner.add(l, l.target); beamLights.push(l);
     }
     if (inner.userData.anim) anims.push(inner.userData.anim);
     const g = wrapItem(inner, it.type, face);
@@ -818,6 +840,7 @@ function rebuildRoom() {
     g.userData.itemId = it.id;
     itemsGroup.add(g);
   }
+  for (const l of lampLights) l.intensity = lampLevel() * l.userData.k;
   syncGhost();
 }
 

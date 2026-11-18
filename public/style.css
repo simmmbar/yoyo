@@ -58,6 +58,9 @@ input:focus-visible, button:focus-visible { outline: 2px solid var(--accent); ou
 canvas#game { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
 canvas#game.drag { cursor: grabbing; }
 #labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+/* 夜晚的暗角:畫面四周暗下來,視線集中在亮處 */
+.stage::after { content: ""; position: absolute; inset: 0; pointer-events: none; opacity: var(--vig, 0); transition: opacity 1.2s;
+  background: radial-gradient(ellipse at 50% 55%, transparent 42%, rgba(12, 10, 34, .55) 100%); }
 .plabel {
   position: absolute; left: 0; top: 0;
   display: flex; flex-direction: column; align-items: center; gap: 4px;
