@@ -2,7 +2,6 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
@@ -274,253 +273,157 @@ function canvasTex(key, w, h, draw) {
     return t;
   });
 }
-function picture(w, h, tex, x, y, z) {
-  const m = new THREE.Mesh(geo(`p${w},${h}`, () => new THREE.PlaneGeometry(w, h)), geo('pm' + tex.uuid, () => new THREE.MeshBasicMaterial({ map: tex, toneMapped: false })));
-  m.position.set(x, y, z);
-  return m;
-}
 
 const WOOD = '#d7a26c', WOOD_D = '#b98352', WOOD_DD = '#9a6a40', CREAM = '#fbf6ec', INK = '#56506e';
 const BOOKS = ['#ee8a8f', '#ffc98a', '#7cc3d6', '#9ed59a', '#c09ae0', '#fbf6ec', '#8c9cea'];
 
-// 家具:原點在佔地的左後角(x、z 最小處);牆面物件原點在牆腳,+z 為朝房間方向
-// 專業模型:KayKit Furniture Bits(Kay Lousberg,CC0)
-const MODEL_NAMES = ['table_medium_long', 'chair_A', 'chair_stool', 'cactus_medium_A', 'cactus_medium_B', 'rug_rectangle_stripes_A', 'rug_oval_A',
-  'lamp_standing', 'table_small', 'cabinet_medium_decorated', 'cabinet_small_decorated', 'couch_pillows', 'armchair_pillows', 'bed_single_A',
-  'pictureframe_large_A', 'shelf_B_large_decorated', 'lamp_table'];
-const MODEL = {};
-const modelsReady0 = Promise.all(MODEL_NAMES.map((n) => new GLTFLoader().loadAsync(`/assets/kaykit/${n}.gltf`).then((g) => {
-  g.scene.traverse((o) => {
-    if (!o.isMesh) return;
-    o.castShadow = !n.startsWith('rug'); o.receiveShadow = true;
-    o.material.roughness = 0.85; o.material.metalness = 0;
-  });
-  MODEL[n] = g.scene;
-})).concat(Object.entries({ window: 'wallWindow.glb', clock: 'wall_clock.gltf', cat: 'cat.glb', tv: 'televisionVintage.glb', tvCabinet: 'cabinetTelevision.glb' }).map(([n, f]) =>
-  new GLTFLoader().loadAsync('/assets/extra/' + f).then((g) => {
-    g.scene.traverse((o) => {
-      if (!o.isMesh) return;
-      o.castShadow = o.receiveShadow = true;
-      if (o.material.name === '_defaultMat') o.visible = false; // 窗戶模型附帶的牆板,用我們自己的牆
-      if (n.startsWith('tv') && o.material.name === 'wood') o.material.color.set('#c9794a');
-      if (n === 'tv' && o.material.name === 'metal') { // 螢幕:自發光
-        o.material.color.set('#6fa8e8'); o.material.emissive.set('#4f8ff0'); o.material.emissiveIntensity = 0.6;
-        MODEL.tvScreen = o.material;
-      }
-      if (n === 'window') {
-        // 只留窗框那一段高度(裁掉牆板上下的飾條);窗戶固定掛在同一高度,所以用水平裁切面即可
-        o.material.clippingPlanes = [new THREE.Plane(new THREE.Vector3(0, 1, 0), -1.2), new THREE.Plane(new THREE.Vector3(0, -1, 0), 2.93)];
-        if (o.material.name === 'wood') o.material.color.set('#c9794a');
-        if (o.material.name === 'glass') { o.material.opacity = 0.12; o.castShadow = false; }
-      }
-      if (n !== 'clock') { o.material.roughness = 0.85; o.material.metalness = 0; }
-      if (o.isSkinnedMesh) o.frustumCulled = false;
-    });
-    MODEL[n] = g.scene; MODEL[n + 'Clips'] = g.animations;
-  }))));
-// Kenney Furniture Kit / Mini Arcade(CC0):比例較修長,放大 2 倍就是真實尺寸
-const KFILES = ['desk', 'chairDesk', 'chairCushion', 'chairModernCushion', 'stoolBar', 'bookcaseOpen', 'bookcaseClosedWide', 'bookcaseOpenLow', 'bookcaseClosed',
-  'bedDouble', 'bedBunk', 'loungeSofa', 'loungeDesignSofa', 'loungeChair', 'loungeSofaOttoman', 'benchCushion', 'tableCoffee', 'table', 'sideTableDrawers',
-  'kitchenFridge', 'cabinetTelevision', 'televisionModern', 'speaker', 'lampRoundFloor', 'lampSquareFloor', 'pottedPlant', 'coatRackStanding', 'trashcan',
-  'cardboardBoxClosed', 'cardboardBoxOpen', 'laptop', 'computerScreen', 'computerKeyboard', 'computerMouse', 'books', 'plantSmall1', 'plantSmall2',
-  'lampRoundTable', 'radio', 'speakerSmall', 'kitchenCoffeeMachine', 'lampWall', 'bathroomMirror', 'kitchenCabinetUpper',
-  'rugRound', 'rugSquare', 'rugRectangle', 'rugDoormat', 'arcade-machine', 'vending-machine', 'claw-machine', 'pinball'];
-const KS = 2, KBB = {}; // KBB:每個模型的外框(原始尺寸)
-// 原始配色偏橘偏紅,換成柔和一點的預設色
-const KBASE = { wood: '#d9b38a', woodDark: '#a67c56', carpet: '#dd8f84', carpetDarker: '#b96f66', carpetBlue: '#7d9fd6', plant: '#62b97c', fur: '#b98a62' };
-const kitReady = Promise.all(KFILES.map((n) => new GLTFLoader().loadAsync(`/assets/kenney/${n}.glb`).then((g) => {
-  g.scene.traverse((o) => {
-    if (!o.isMesh) return;
-    const m = o.material, nm = m.name;
-    o.castShadow = !n.startsWith('rug') && nm !== 'glass'; o.receiveShadow = true;
-    m.roughness = 0.88; m.metalness = 0;
-    if (KBASE[nm]) m.color.set(KBASE[nm]);
-    if (nm === 'lamp') { m.color.set('#fff1c9'); m.emissive.set('#ffd98a'); m.emissiveIntensity = 1.3; }
-    if (nm === 'glass') { m.transparent = true; m.opacity = 0.35; m.depthWrite = false; }
-  });
-  MODEL['k:' + n] = g.scene;
-  KBB[n] = new THREE.Box3().setFromObject(g.scene);
-})));
+// ---------- 家具:全部是本專案用 Blender 做的原創模型(tools/blender/furniture.py),卡通打光 + 描邊 ----------
+// 模型原點在佔地中心、底部貼地,正面朝 +z(房間這一側);牆面掛飾的背面在 z = 0。
+// 規格:m 模型檔名、back 靠佔地後緣(適合靠牆)、seat 座面高度、pull 坐下時椅子往桌子拉近多少、
+//       surf 檯面高度(可放小物)、lamp 燈光位置(數字 = 高度)、glow 螢幕的光
+const ITEMS = {
+  kdesk: { m: 'desk', surf: 0.74 }, dining: { m: 'table', surf: 0.74 }, coffee: { m: 'coffee', surf: 0.4 }, side: { m: 'side', surf: 0.52, back: 1 },
+  kchair: { m: 'chair', seat: 0.5, pull: 0.27 }, cchair: { m: 'dchair', seat: 0.49, pull: 0.2 }, stool: { m: 'stool', seat: 0.46, pull: 0.2 },
+  kcase: { m: 'bookcase', back: 1 }, doorcase: { m: 'cabinet', back: 1 }, widecase: { m: 'sideboard', back: 1, surf: 0.95 }, lowcase: { m: 'lowcase', back: 1, surf: 0.75 },
+  rack: { m: 'rack' }, box: { m: 'box' },
+  bed: { m: 'bed', surf: 0.53 }, dbed: { m: 'bed_double', surf: 0.53 }, ksofa: { m: 'sofa', back: 1 }, lchair: { m: 'armchair', seat: 0.42 }, ottoman: { m: 'ottoman', seat: 0.4 },
+  tv2: { m: 'tv', back: 1, glow: [1, 0.9, 1.0] }, fridge: { m: 'fridge', back: 1 }, spk: { m: 'speaker' }, arcade: { m: 'arcade', glow: [0.5, 1.2, 1.0] }, vending: { m: 'vending', back: 1 },
+  flamp: { m: 'floorlamp', lamp: 1.6 }, bigplant: { m: 'plant_big' }, plant: { m: 'plant' }, bin: { m: 'bin' }, cat: { m: 'cat' },
+  monitor: { m: 'monitor' }, tlaptop: { m: 'laptop' }, tlamp: { m: 'lamp', lamp: 0.36 }, tbooks: { m: 'books' }, tplant: { m: 'plant_small' }, tplant2: { m: 'succulent' },
+  radio: { m: 'radio' }, brew: { m: 'teaset' },
+  window: { m: 'window' }, painting: { m: 'frame' }, poster: { m: 'poster' }, clock: { m: 'clock' }, shelf: { m: 'wallshelf' }, wlamp: { m: 'walllamp', lamp: 1.95 }, mirror: { m: 'mirror' },
+};
+const SFILES = [...new Set(Object.values(ITEMS).map((k) => k.m)), 'door'];
+const MODEL = {}, SBB = {}, STINT = {}; // 模型、外框、可否換色
+let modelsLoaded = false;
 // 換色:有布料的家具換布料顏色,其餘換木頭顏色(0 = 原色)
 const FABRICS = [null, '#e7a3b4', '#f0c987', '#9fc7a3', '#8fb8d8', '#a9a0dc', '#f3ede2', '#5b5870'];
-const WOODS = [null, '#ecd8b8', '#b88758', '#7a5236', '#f4f1ea', '#4a4652', '#e7b7b0', '#a9c9b4'];
-const tintCache = new Map();
-function tinted(m, c, fabric) {
-  const nm = m.name, col = fabric ? (/^carpet(Blue)?$/.test(nm) ? FABRICS[c] : nm === 'carpetDarker' ? FABRICS[c] + '|d' : null) : (nm === 'wood' ? WOODS[c] : nm === 'woodDark' ? WOODS[c] + '|d' : null);
-  if (!col) return m;
-  const key = m.uuid + col;
-  if (!tintCache.has(key)) { const t = m.clone(); t.color.set(col.split('|')[0]); if (col.endsWith('|d')) t.color.multiplyScalar(0.72); tintCache.set(key, t); }
-  return tintCache.get(key);
-}
-// 放一個 Kenney 模型:以外框中心對齊 (x, z),底部貼在 y;fit = [寬, 深] 時超過會等比例縮小
-function kput(g, n, o = {}) {
-  const bb = KBB[n], m = MODEL['k:' + n].clone();
-  let s = o.s || KS;
-  if (o.fit) s = Math.min(s, o.fit[0] / (bb.max.x - bb.min.x), o.fit[1] / (bb.max.z - bb.min.z));
-  if (o.c) { let fabric = false; m.traverse((ch) => { if (ch.isMesh && /^carpet(Blue)?$/.test(ch.material.name)) fabric = true; }); m.traverse((ch) => { if (ch.isMesh) ch.material = tinted(ch.material, o.c, fabric); }); }
-  m.scale.setScalar(s);
-  m.position.set(-(bb.min.x + bb.max.x) / 2 * s, -bb.min.y * s, -(bb.min.z + bb.max.z) / 2 * s);
-  const piv = new THREE.Group();
-  piv.add(m); piv.position.set(o.x || 0, o.y || 0, o.z || 0); piv.rotation.y = o.ry || 0;
-  g.add(piv);
-  return { piv, s, w: (bb.max.x - bb.min.x) * s, h: (bb.max.y - bb.min.y) * s, d: (bb.max.z - bb.min.z) * s };
-}
-// 新家具的規格:m 模型、s 縮放、back 靠佔地後緣(適合靠牆)、seat 座面高度、surf 桌面可放小物、lamp 會發光、y 牆面掛飾的高度
-const KIT = {
-  kdesk: { m: 'desk', surf: 1 }, dining: { m: 'table', surf: 1 }, coffee: { m: 'tableCoffee', surf: 1 }, side: { m: 'sideTableDrawers', surf: 1, back: 1 },
-  kchair: { m: 'chairDesk', seat: 0.5 }, cchair: { m: 'chairCushion', seat: 0.46 }, mchair: { m: 'chairModernCushion', seat: 0.46 }, barstool: { m: 'stoolBar' },
-  kcase: { m: 'bookcaseOpen', back: 1 }, doorcase: { m: 'bookcaseClosed', back: 1 }, widecase: { m: 'bookcaseClosedWide', back: 1 }, lowcase: { m: 'bookcaseOpenLow', back: 1, surf: 1 },
-  rack: { m: 'coatRackStanding' }, box: { m: 'cardboardBoxClosed' },
-  dbed: { m: 'bedDouble', surf: 0.46 }, bunk: { m: 'bedBunk' }, ksofa: { m: 'loungeSofa', back: 1 }, dsofa: { m: 'loungeDesignSofa', back: 1 },
-  lchair: { m: 'loungeChair', seat: 0.4, back: 1 }, ottoman: { m: 'loungeSofaOttoman' }, bench: { m: 'benchCushion', seat: 0.46, back: 1 },
-  fridge: { m: 'kitchenFridge', back: 1 }, spk: { m: 'speaker' },
-  arcade: { m: 'arcade-machine', s: 2 }, vending: { m: 'vending-machine', s: 1.9, back: 1 }, claw: { m: 'claw-machine', s: 1.4 }, pinball: { m: 'pinball', s: 2 },
-  flamp: { m: 'lampRoundFloor', lamp: 1 }, flamp2: { m: 'lampSquareFloor', lamp: 1 }, bigplant: { m: 'pottedPlant' }, bin: { m: 'trashcan', s: 1.3 },
-  tlaptop: { m: 'laptop' }, tbooks: { m: 'books', s: 2.4 }, tplant: { m: 'plantSmall1', s: 2.4 }, tplant2: { m: 'plantSmall2', s: 2.4 }, tlamp: { m: 'lampRoundTable', lamp: 1 },
-  radio: { m: 'radio', s: 1.5 }, tspk: { m: 'speakerSmall', s: 1.6 }, brew: { m: 'kitchenCoffeeMachine' }, obox: { m: 'cardboardBoxOpen', s: 1.6 },
-  wlamp: { m: 'lampWall', y: 2.1, lamp: 1 }, mirror: { m: 'bathroomMirror', y: 1.25, s: 2.4 }, wcab: { m: 'kitchenCabinetUpper', y: 1.7 },
-  rround: { m: 'rugRound' }, rsquare: { m: 'rugSquare' }, rbig: { m: 'rugRectangle' }, mat: { m: 'rugDoormat' },
-};
-const kScale = (type) => { const k = KIT[type], d = CATALOG[type], bb = KBB[k.m]; return Math.min(k.s || KS, (d.w - 0.06) / (bb.max.x - bb.min.x), (d.h - 0.04) / (bb.max.z - bb.min.z)); };
-function buildKit(g, type, o = {}) {
-  const k = KIT[type], d = CATALOG[type];
-  if (d.kind === 'wall') {
-    const bb = KBB[k.m], s = k.s || KS, info = kput(g, k.m, { s, x: d.w / 2, y: k.y, z: (bb.max.z - bb.min.z) * s / 2 + 0.01, c: o.c });
-    if (k.lamp) g.userData.lampAt = new THREE.Vector3(d.w / 2, k.y, 0.35);
-    return info;
-  }
-  const info = kput(g, k.m, { s: k.s, fit: [d.w - 0.06, d.h - 0.04], x: d.w / 2, z: d.h / 2, c: o.c });
-  if (k.back) info.piv.position.z = info.d / 2 + 0.04;
-  if (k.lamp) g.userData.lampAt = new THREE.Vector3(d.w / 2, info.h * 0.86, d.h / 2);
-  return info;
-}
-// 發亮的螢幕畫面(電腦螢幕、筆電、電視共用)
+const WOODS = [null, '#f1e2c8', '#b88758', '#7a5236', '#f4f1ea', '#4a4652', '#e7b7b0', '#a9c9b4'];
+
+// 遊戲端畫的圖:螢幕畫面、窗外風景、掛畫、海報
 const screenTex = () => canvasTex('pcscreen', 256, 144, (c, w, h) => {
   const gr = c.createLinearGradient(0, 0, w, h); gr.addColorStop(0, '#2c3a78'); gr.addColorStop(1, '#7a4f9a'); c.fillStyle = gr; c.fillRect(0, 0, w, h);
   c.fillStyle = 'rgba(255,255,255,.92)'; c.fillRect(18, 16, 132, 96); c.fillStyle = '#8c9cea'; c.fillRect(18, 16, 132, 12);
   c.fillStyle = '#c9cfe8'; for (let i = 0; i < 6; i++) c.fillRect(28, 38 + i * 11, 60 + ((i * 37) % 50), 5);
   c.fillStyle = 'rgba(255,255,255,.85)'; c.fillRect(162, 30, 78, 60); c.fillStyle = '#ffc98a'; c.beginPath(); c.arc(201, 60, 18, 0, 7); c.fill();
 });
+const skyTex = (mode) => canvasTex('sky' + mode, 384, 256, (c, w, h) => {
+  const gr = c.createLinearGradient(0, 0, 0, h);
+  const cols = { night: ['#1b2452', '#4a5596'], dusk: ['#6a7cc8', '#ffbe95'], day: ['#8fd0f5', '#e3f5fd'] }[mode];
+  gr.addColorStop(0, cols[0]); gr.addColorStop(1, cols[1]); c.fillStyle = gr; c.fillRect(0, 0, w, h);
+  if (mode === 'night') {
+    c.fillStyle = '#fff';
+    for (let i = 0; i < 40; i++) { c.globalAlpha = 0.4 + ((i * 37) % 60) / 100; c.beginPath(); c.arc((i * 97) % w, (i * 53) % (h * 0.75), 1 + (i % 3) * 0.5, 0, 7); c.fill(); }
+    c.globalAlpha = 1; c.fillStyle = '#fff5cf'; c.beginPath(); c.arc(290, 78, 24, 0, 7); c.fill();
+    c.fillStyle = cols[0]; c.beginPath(); c.arc(278, 70, 21, 0, 7); c.fill();
+  } else {
+    c.fillStyle = mode === 'dusk' ? '#ffe0a0' : '#fff7c4'; c.beginPath(); c.arc(290, mode === 'dusk' ? 160 : 78, 24, 0, 7); c.fill();
+    c.fillStyle = 'rgba(255,255,255,.9)';
+    for (const [x, y, r] of [[70, 78, 20], [96, 70, 26], [124, 80, 18], [216, 112, 12], [232, 108, 15]]) { c.beginPath(); c.arc(x, y, r, 0, 7); c.fill(); }
+  }
+  const land = { night: ['#232a55', '#161b3a'], dusk: ['#7d5a8c', '#4b3a66'], day: ['#8fcf8a', '#5fae6a'] }[mode];
+  c.fillStyle = land[0]; c.beginPath(); c.moveTo(0, h); c.lineTo(0, h * 0.72); c.quadraticCurveTo(w * 0.25, h * 0.58, w * 0.5, h * 0.7); c.quadraticCurveTo(w * 0.78, h * 0.82, w, h * 0.64); c.lineTo(w, h); c.fill();
+  c.fillStyle = land[1]; c.beginPath(); c.moveTo(0, h); c.lineTo(0, h * 0.84);
+  for (let i = 0; i <= 10; i++) c.quadraticCurveTo((i + 0.5) * w / 10 - w / 20, h * (0.76 + (i % 3) * 0.02), (i + 1) * w / 10, h * 0.86);
+  c.lineTo(w, h); c.fill();
+});
+const posterTex = () => canvasTex('poster', 256, 352, (c, w, h) => {
+  const gr = c.createLinearGradient(0, 0, 0, h); gr.addColorStop(0, '#2b2f66'); gr.addColorStop(0.55, '#c45c8a'); gr.addColorStop(1, '#ffb27a'); c.fillStyle = gr; c.fillRect(0, 0, w, h);
+  c.fillStyle = '#ffe3b0'; c.beginPath(); c.arc(w / 2, h * 0.52, 46, 0, 7); c.fill();
+  c.fillStyle = '#3a2a5c'; c.beginPath(); c.moveTo(0, h); c.lineTo(0, h * 0.72); c.lineTo(70, h * 0.56); c.lineTo(130, h * 0.7); c.lineTo(190, h * 0.6); c.lineTo(w, h * 0.74); c.lineTo(w, h); c.fill();
+  c.fillStyle = '#241a40'; c.beginPath(); c.moveTo(0, h); c.lineTo(0, h * 0.86); c.lineTo(90, h * 0.76); c.lineTo(170, h * 0.88); c.lineTo(w, h * 0.8); c.lineTo(w, h); c.fill();
+  c.fillStyle = '#fff'; for (let i = 0; i < 18; i++) { c.globalAlpha = 0.5 + (i % 4) * 0.12; c.fillRect((i * 67) % w, (i * 41) % (h * 0.4), 2, 2); } c.globalAlpha = 1;
+});
+const artTex = () => canvasTex('art', 256, 344, (c, w, h) => { // 掛畫:海邊的小屋
+  c.fillStyle = '#fbe9cf'; c.fillRect(0, 0, w, h);
+  c.fillStyle = '#f7c9a0'; c.beginPath(); c.arc(w * 0.68, h * 0.3, 40, 0, 7); c.fill();
+  c.fillStyle = '#9fd3d6'; c.fillRect(0, h * 0.5, w, h * 0.5);
+  c.fillStyle = '#7fbfc6'; for (let i = 0; i < 5; i++) c.fillRect(20 + i * 40, h * (0.58 + i * 0.07), 90, 4);
+  c.fillStyle = '#e9b98c'; c.beginPath(); c.moveTo(0, h); c.lineTo(0, h * 0.74); c.quadraticCurveTo(w * 0.3, h * 0.66, w * 0.62, h * 0.86); c.lineTo(w * 0.7, h); c.fill();
+  c.fillStyle = '#fff8ee'; c.fillRect(40, h * 0.6, 62, 46); c.fillStyle = '#e58a7c'; c.beginPath(); c.moveTo(32, h * 0.6); c.lineTo(71, h * 0.5); c.lineTo(110, h * 0.6); c.fill();
+  c.fillStyle = '#6fa3b8'; c.fillRect(62, h * 0.66, 18, 26);
+});
+const TEX = { screen: screenTex, poster: posterTex, art: artTex, sky: () => skyTex(mood) };
 
-// ---------- 原創家具(tools/blender/furniture.py 用 Blender 做的):卡通打光 + 描邊,和動漫角色同一種畫法 ----------
-const SFILES = ['desk', 'chair', 'bookcase', 'lamp', 'monitor'];
-const toonRamp = new THREE.DataTexture(new Uint8Array([168, 214, 255]), 3, 1, THREE.RedFormat); // 三階明暗
+// 卡通材質:三階明暗;描邊、螢幕、窗景等用不受光的材質
+const toonRamp = new THREE.DataTexture(new Uint8Array([150, 200, 236]), 3, 1, THREE.RedFormat);
 toonRamp.minFilter = toonRamp.magFilter = THREE.NearestFilter; toonRamp.needsUpdate = true;
 const toonCache = new Map();
 function toonMat(name, hex) {
-  const key = name + hex;
+  const key = TEX[name] ? name + TEX[name]().uuid : name + hex;
   if (!toonCache.has(key)) {
     let m;
     if (name === 'outline') m = new THREE.MeshBasicMaterial({ color: '#5b4638' });
-    else if (name === 'screen') { const t = screenTex().clone(); t.flipY = false; t.needsUpdate = true; m = new THREE.MeshBasicMaterial({ map: t, toneMapped: false }); }
+    else if (TEX[name]) { const t = TEX[name]().clone(); t.flipY = false; t.needsUpdate = true; m = new THREE.MeshBasicMaterial({ map: t, toneMapped: false }); }
+    else if (name === 'mirror') m = new THREE.MeshBasicMaterial({ color: '#dbeef6' });
     else {
       m = new THREE.MeshToonMaterial({ color: hex, gradientMap: toonRamp });
-      if (name === 'shade') { m.emissive.set('#ffd08a'); m.emissiveIntensity = 0.4; }
+      if (name === 'shade') { m.emissive.set('#ffc98a'); m.emissiveIntensity = 0.22; }
     }
     m.name = name;
     toonCache.set(key, m);
   }
   return toonCache.get(key);
 }
-const studioReady = Promise.all(SFILES.map((n) => new GLTFLoader().loadAsync(`/assets/studio/${n}.glb`).then((g) => {
+const flat = (name) => name === 'outline' || name === 'mirror' || !!TEX[name]; // 不受光、也不投影的材質
+const modelsReady = Promise.all(SFILES.map((n) => new GLTFLoader().loadAsync(`/assets/studio/${n}.glb`).then((g) => {
   g.scene.traverse((o) => {
     if (!o.isMesh) return;
     const nm = o.material.name;
     o.userData.hex = '#' + o.material.color.getHexString();
     o.material = toonMat(nm, o.userData.hex);
-    o.castShadow = nm !== 'outline' && nm !== 'screen'; o.receiveShadow = nm !== 'outline' && nm !== 'screen';
+    o.castShadow = o.receiveShadow = !flat(nm);
+    if (nm === 'fabric' || nm === 'wood') STINT[n] = true;
   });
-  MODEL['s:' + n] = g.scene;
-})));
-// 放一個原創家具:原點在佔地中心、底部貼地。c = 換色(有布料換布料,否則換木頭)
+  MODEL[n] = g.scene;
+  SBB[n] = new THREE.Box3().setFromObject(g.scene);
+}))).then(() => { modelsLoaded = true; });
+// 放一個模型。c = 換色(有布料換布料,否則換木頭)
 function sput(g, n, o = {}) {
-  const m = MODEL['s:' + n].clone();
-  if (o.c) {
-    let fabric = false;
-    m.traverse((ch) => { if (ch.isMesh && ch.material.name === 'fabric') fabric = true; });
-    m.traverse((ch) => {
-      if (!ch.isMesh) return;
-      const nm = ch.material.name;
-      if (fabric && nm === 'fabric') ch.material = toonMat(nm, FABRICS[o.c]);
-      else if (!fabric && nm === 'wood') ch.material = toonMat(nm, WOODS[o.c]);
-      else if (!fabric && nm === 'woodDark') ch.material = toonMat(nm, '#' + new THREE.Color(WOODS[o.c]).multiplyScalar(0.72).getHexString());
-    });
-  }
+  const m = MODEL[n].clone();
+  let fabric = false;
+  m.traverse((ch) => { if (ch.isMesh && ch.material.name === 'fabric') fabric = true; });
+  m.traverse((ch) => {
+    if (!ch.isMesh) return;
+    const nm = ch.material.name;
+    if (nm === 'sky') ch.material = toonMat('sky'); // 窗景跟著目前的光線(白天/黃昏/夜晚)
+    if (!o.c) return;
+    if (fabric && nm === 'fabric') ch.material = toonMat(nm, FABRICS[o.c]);
+    else if (!fabric && nm === 'wood') ch.material = toonMat(nm, WOODS[o.c]);
+    else if (!fabric && nm === 'woodDark') ch.material = toonMat(nm, '#' + new THREE.Color(WOODS[o.c]).multiplyScalar(0.72).getHexString());
+  });
   m.position.set(o.x || 0, o.y || 0, o.z || 0); m.rotation.y = o.ry || 0;
   g.add(m);
   return m;
 }
-const modelsReady = Promise.all([modelsReady0, kitReady, studioReady]);
-function put(g, name, s, x, y, z, ry = 0) {
-  const o = MODEL[name].clone();
-  if (Array.isArray(s)) o.scale.set(...s); else o.scale.setScalar(s);
-  o.position.set(x, y, z); o.rotation.y = ry;
-  g.add(o); return o;
+
+// 地毯:平面 + 畫出來的花樣(條紋、同心圓、邊框),c 可換底色
+const RUGS = {
+  rug: { col: '#f0c987', shape: 'rect', pat: 'stripes' }, rug2: { col: '#e7a3b4', shape: 'oval', pat: 'rings' },
+  rround: { col: '#f3ede2', shape: 'oval', pat: 'rings' }, rsquare: { col: '#9fc7a3', shape: 'rect', pat: 'diamond' },
+  rbig: { col: '#f3ede2', shape: 'rect', pat: 'border' }, mat: { col: '#d9b38a', shape: 'rect', pat: 'mat' },
+};
+function buildRug(g, type, o = {}) {
+  const d = CATALOG[type], k = RUGS[type], W = d.w - 0.12, H = d.h - (type === 'mat' ? 0.45 : 0.12), base = new THREE.Color(FABRICS[o.c] || k.col);
+  const tex = canvasTex(`rug${type}${o.c || 0}`, 256, Math.round(256 * H / W), (c, w, h) => {
+    const hex = (m) => '#' + base.clone().multiplyScalar(m).getHexString(), lite = '#' + base.clone().lerp(new THREE.Color('#ffffff'), 0.55).getHexString();
+    const path = (inset) => { c.beginPath(); if (k.shape === 'oval') c.ellipse(w / 2, h / 2, w / 2 - inset, h / 2 - inset, 0, 0, 7); else c.roundRect(inset, inset, w - inset * 2, h - inset * 2, 14); };
+    c.clearRect(0, 0, w, h);
+    path(1); c.fillStyle = hex(1); c.fill(); c.save(); c.clip();
+    if (k.pat === 'stripes') { c.fillStyle = lite; for (let x = 18; x < w; x += 44) c.fillRect(x, 0, 16, h); c.fillStyle = hex(0.82); for (let x = 40; x < w; x += 44) c.fillRect(x, 0, 4, h); }
+    if (k.pat === 'diamond') { c.strokeStyle = lite; c.lineWidth = 6; for (let i = -4; i < 8; i++) { c.beginPath(); c.moveTo(i * 48, 0); c.lineTo(i * 48 + h, h); c.moveTo(i * 48 + h, 0); c.lineTo(i * 48, h); c.stroke(); } }
+    c.restore();
+    if (k.pat === 'rings') for (const [ins, col, lw] of [[14, lite, 8], [38, hex(0.84), 4], [60, lite, 5]]) { path(ins); c.strokeStyle = col; c.lineWidth = lw; c.stroke(); }
+    if (k.pat === 'border') { for (const [ins, col, lw] of [[12, hex(0.8), 6], [26, lite, 4]]) { path(ins); c.strokeStyle = col; c.lineWidth = lw; c.stroke(); } }
+    if (k.pat === 'mat') { path(10); c.strokeStyle = hex(0.7); c.lineWidth = 5; c.stroke(); c.fillStyle = hex(0.62); c.font = '700 44px system-ui, sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText('HELLO', w / 2, h / 2 + 3); }
+    path(2); c.strokeStyle = '#5b4638'; c.lineWidth = 3; c.stroke(); // 外圈描邊
+  });
+  const m = new THREE.Mesh(geo(`rugp${W},${H}`, () => new THREE.PlaneGeometry(W, H)), geo('rugm' + tex.uuid, () => new THREE.MeshToonMaterial({ map: tex, gradientMap: toonRamp, transparent: true, alphaTest: 0.5 })));
+  m.rotation.x = -Math.PI / 2; m.position.set(d.w / 2, 0.012 + (type === 'mat' ? 0.004 : 0), d.h / 2); m.receiveShadow = true;
+  g.add(m);
 }
 
 const BUILD = {
-  chair(g) { put(g, 'chair_A', 0.68, 0.5, 0, 0.5); },
-  stool(g) { put(g, 'chair_stool', 0.68, 0.5, 0, 0.5); },
-  plant(g) { put(g, 'cactus_medium_A', 0.95, 0.5, 0, 0.5); },
-  tree(g) { put(g, 'cactus_medium_B', 1.1, 0.5, 0, 0.5); },
-  rug(g) { put(g, 'rug_rectangle_stripes_A', [0.95, 0.5, 0.94], 1.5, 0, 1); },
-  rug2(g) { put(g, 'rug_oval_A', [0.95, 0.5, 0.94], 1.5, 0, 1); },
-  table(g) { put(g, 'table_small', 0.85, 0.5, 0, 0.5); put(g, 'lamp_table', 0.6, 0.5, 0.85, 0.5); },
-  bookshelf(g) { put(g, 'cabinet_medium_decorated', [0.94, 0.94, 0.86], 1, 0, 0.47); },
-  cabinet(g) { put(g, 'cabinet_small_decorated', 0.86, 0.5, 0, 0.47); },
-  sofa(g) { put(g, 'couch_pillows', [0.65, 0.68, 0.6], 1, 0, 0.5); },
-  armchair(g) { put(g, 'armchair_pillows', [0.54, 0.64, 0.58], 0.5, 0, 0.5); },
-  bed(g) { put(g, 'bed_single_A', [0.6, 0.64, 0.65], 0.5, 0, 1); },
-  painting(g) { put(g, 'pictureframe_large_A', 0.85, 0.5, 2.3, 0); },
-  shelf(g) { put(g, 'shelf_B_large_decorated', 0.9, 1, 2.35, 0); },
-  // o.side:椅子在書桌的哪一側(+1 靠房間這側、-1 靠牆那側);o.sx:椅子對著書桌的哪個位置
-  desk(g, o = {}) {
-    const side = o.side || 1, sx = o.sx ?? 0.95, ox = sx > 1 ? 0.4 : 1.6; // 雜物放在筆電的另一頭
-    put(g, 'table_medium_long', [0.64, 0.82, 0.42], 1, 0, 0.5);
-    const lap = new THREE.Group();
-    lap.add(box(0.46, 0.025, 0.32, '#d9dce6', 0, 0, 0.06, 0.01));
-    const scr = box(0.46, 0.3, 0.02, '#4a4d68', 0, 0.02, -0.1, 0.008); scr.rotation.x = -0.18; lap.add(scr);
-    const lit = box(0.4, 0.24, 0.006, '#bfe6f5', 0, 0.05, -0.087, 0.002, glow('#9fd8f0', 1.3)); lit.rotation.x = -0.18; lap.add(lit);
-    lap.position.set(sx, 0.82, 0.5); lap.rotation.y = side > 0 ? 0 : Math.PI;
-    g.add(lap);
-    if (o.clear) return; // 桌上已經擺了別的小物,就不放內建的杯子和書
-    g.add(cyl(0.055, 0.045, 0.11, CREAM, sx + (sx > 1 ? -0.42 : 0.42), 0.82, 0.5 - side * 0.12), cyl(0.045, 0.045, 0.01, '#8a5a3c', sx + (sx > 1 ? -0.42 : 0.42), 0.925, 0.5 - side * 0.12));
-    g.add(box(0.32, 0.05, 0.24, BOOKS[0], ox, 0.82, 0.5, 0.01));
-    const b2 = box(0.28, 0.05, 0.22, BOOKS[2], ox, 0.87, 0.5, 0.01); b2.rotation.y = 0.25; g.add(b2);
-    g.add(cyl(0.05, 0.04, 0.12, '#8c9cea', ox + (sx > 1 ? -0.22 : 0.22), 0.82, 0.5 - side * 0.2), cyl(0.008, 0.008, 0.16, '#ffc98a', ox + (sx > 1 ? -0.23 : 0.21), 0.86, 0.5 - side * 0.2), cyl(0.008, 0.008, 0.17, '#ee8a8f', ox + (sx > 1 ? -0.2 : 0.24), 0.86, 0.5 - side * 0.19));
-  },
-  // 電腦桌:螢幕、鍵盤、滑鼠朝向有椅子的那一側
-  pc(g, o = {}) {
-    const side = o.side || 1, sx = o.sx ?? 0.95, ox = sx > 1 ? 0.38 : 1.62;
-    put(g, 'table_medium_long', [0.64, 0.82, 0.42], 1, 0, 0.5);
-    const set = new THREE.Group();
-    set.add(box(0.2, 0.02, 0.14, '#3b3d52', 0, 0, -0.16, 0.006), box(0.04, 0.16, 0.03, '#3b3d52', 0, 0.02, -0.17, 0.006));
-    set.add(box(0.72, 0.42, 0.03, '#2b2d40', 0, 0.16, -0.15, 0.012));
-    const scr = picture(0.67, 0.37, canvasTex('pcscreen', 256, 144, (c, w, h) => {
-      const gr = c.createLinearGradient(0, 0, w, h); gr.addColorStop(0, '#2c3a78'); gr.addColorStop(1, '#7a4f9a'); c.fillStyle = gr; c.fillRect(0, 0, w, h);
-      c.fillStyle = 'rgba(255,255,255,.92)'; c.fillRect(18, 16, 132, 96); c.fillStyle = '#8c9cea'; c.fillRect(18, 16, 132, 12);
-      c.fillStyle = '#c9cfe8'; for (let i = 0; i < 6; i++) c.fillRect(28, 38 + i * 11, 60 + ((i * 37) % 50), 5);
-      c.fillStyle = 'rgba(255,255,255,.85)'; c.fillRect(162, 30, 78, 60); c.fillStyle = '#ffc98a'; c.beginPath(); c.arc(201, 60, 18, 0, 7); c.fill();
-    }), 0, 0.37, -0.133);
-    set.add(scr);
-    set.add(box(0.46, 0.02, 0.15, '#e6e8f0', 0, 0, 0.1, 0.006), box(0.07, 0.022, 0.1, '#e6e8f0', 0.36, 0, 0.1, 0.01), box(0.2, 0.004, 0.18, '#56506e', 0.36, 0, 0.1, 0.002));
-    set.position.set(sx, 0.82, 0.5); set.rotation.y = side > 0 ? 0 : Math.PI;
-    g.add(set);
-    if (o.clear) return;
-    g.add(cyl(0.055, 0.045, 0.11, CREAM, ox, 0.82, 0.5 + side * 0.08), cyl(0.045, 0.045, 0.01, '#8a5a3c', ox, 0.925, 0.5 + side * 0.08));
-    g.add(box(0.26, 0.04, 0.2, BOOKS[4], ox, 0.82, 0.5 - side * 0.16, 0.01));
-    g.userData.glowAt = null;
-  },
-  poster(g) {
-    const tex = canvasTex('poster', 256, 352, (c, w, h) => {
-      const gr = c.createLinearGradient(0, 0, 0, h); gr.addColorStop(0, '#2b2f66'); gr.addColorStop(0.55, '#c45c8a'); gr.addColorStop(1, '#ffb27a'); c.fillStyle = gr; c.fillRect(0, 0, w, h);
-      c.fillStyle = '#ffe3b0'; c.beginPath(); c.arc(w / 2, h * 0.52, 46, 0, 7); c.fill();
-      c.fillStyle = '#3a2a5c'; c.beginPath(); c.moveTo(0, h); c.lineTo(0, h * 0.72); c.lineTo(70, h * 0.56); c.lineTo(130, h * 0.7); c.lineTo(190, h * 0.6); c.lineTo(w, h * 0.74); c.lineTo(w, h); c.fill();
-      c.fillStyle = '#241a40'; c.beginPath(); c.moveTo(0, h); c.lineTo(0, h * 0.86); c.lineTo(90, h * 0.76); c.lineTo(170, h * 0.88); c.lineTo(w, h * 0.8); c.lineTo(w, h); c.fill();
-      c.fillStyle = '#fff'; for (let i = 0; i < 18; i++) { c.globalAlpha = 0.5 + (i % 4) * 0.12; c.fillRect((i * 67) % w, (i * 41) % (h * 0.4), 2, 2); } c.globalAlpha = 1;
-    });
-    g.add(box(0.74, 1.02, 0.03, '#fbf6ec', 0.5, 1.42, 0.02, 0.008), picture(0.68, 0.96, tex, 0.5, 1.93, 0.037));
-  },
   neon(g) {
     const pink = mat('#ff7fb0', glow('#ff4f98', 5)), blue = mat('#9fe6ff', glow('#5fd0ff', 5));
     const arc = new THREE.Mesh(geo('neonArc', () => new THREE.TorusGeometry(0.3, 0.022, 10, 48, Math.PI * 1.25)), pink);
@@ -533,123 +436,33 @@ const BUILD = {
     g.add(arc, arc2, star, box(0.6, 0.02, 0.02, '#3b3a4a', 0.5, 1.7, 0.02, 0.005));
     g.userData.neonAt = new THREE.Vector3(0.5, 2.1, 0.5);
   },
-  lamp(g) {
-    put(g, 'lamp_standing', 0.68, 0.5, 0, 0.5);
-    g.userData.lampAt = new THREE.Vector3(0.5, 1.35, 0.5);
-  },
-  tv(g) {
-    put(g, 'tvCabinet', 1.2, 0.02, 0, 0.62);
-    put(g, 'tv', 1.6, 0.17, 0.372, 0.68);
-    // 像在播節目一樣,亮度與色調緩慢變化
-    g.userData.anim = (t) => {
-      const m = MODEL.tvScreen;
-      if (!m) return;
-      const k = 1 + Math.sin(t / 900) * 0.14 + Math.sin(t / 233) * 0.09, hue = 0.6 + Math.sin(t / 4000) * 0.04;
-      m.emissiveIntensity = 0.6 * k;
-      m.emissive.setHSL(hue, 0.85, 0.55);
-      const l = g.userData.glow; // 螢幕前方的光,跟著螢幕一起閃動
-      if (l) { l.intensity = 4 * k; l.color.setHSL(hue, 1, 0.5); }
+};
+for (const type of Object.keys(RUGS)) BUILD[type] = (g, o) => buildRug(g, type, o);
+for (const [type, k] of Object.entries(ITEMS)) BUILD[type] = (g, o = {}) => {
+  const d = CATALOG[type], bb = SBB[k.m], wall = d.kind === 'wall';
+  const z = wall ? 0 : k.back ? (bb.max.z - bb.min.z) / 2 + 0.03 : d.h / 2;
+  sput(g, k.m, { x: d.w / 2, z, c: o.c, ry: o.side === -1 ? Math.PI : 0 });
+  if (k.lamp) g.userData.lampAt = new THREE.Vector3(d.w / 2, k.lamp, wall ? 0.3 : z);
+  if (k.glow) g.userData.glowAt = new THREE.Vector3(...k.glow);
+  if (type === 'clock') { // 指針依現在時間轉動
+    const hand = (w, len, col) => {
+      const h = new THREE.Mesh(geo(`hand${w},${len}`, () => new THREE.BoxGeometry(w, len, 0.004).translate(0, len / 2 - 0.012, 0)), toonMat('hand', col));
+      h.position.set(d.w / 2, 2.15, 0.064); g.add(h); return h;
     };
-    g.userData.glowAt = new THREE.Vector3(0.5, 0.62, 1.05);
-  },
-
-  cat(g) {
-    const m = cloneSkinned(MODEL.cat);
-    const bb = new THREE.Box3();
-    m.updateMatrixWorld(true);
-    m.traverse((o) => { if (o.isSkinnedMesh) { o.computeBoundingBox(); bb.union(o.boundingBox.clone().applyMatrix4(o.matrixWorld)); } });
-    const k = 0.42 / (bb.max.y - bb.min.y || 1); // 貓咪大約到小腿高
-    m.scale.setScalar(k); m.position.set(0.5, -bb.min.y * k, 0.45); m.rotation.y = 0.5;
-    g.add(m);
-    const clip = MODEL.catClips.find((c) => /Idle$/.test(c.name));
-    if (clip) {
-      const mixer = new THREE.AnimationMixer(m);
-      mixer.clipAction(clip).play();
-      g.userData.anim = (t) => mixer.setTime(t / 1000);
-    }
-  },
-
-  window(g) {
-    const mode = mood;
-    const sky = canvasTex('sky' + mode, 256, 224, (c, w, h) => {
-      const gr = c.createLinearGradient(0, 0, 0, h);
-      const cols = { night: ['#1b2452', '#4a5596'], dusk: ['#6a7cc8', '#ffbe95'], day: ['#8fd0f5', '#e3f5fd'] }[mode];
-      gr.addColorStop(0, cols[0]); gr.addColorStop(1, cols[1]); c.fillStyle = gr; c.fillRect(0, 0, w, h);
-      if (mode === 'night') {
-        c.fillStyle = '#fff';
-        for (let i = 0; i < 26; i++) { c.globalAlpha = 0.4 + ((i * 37) % 60) / 100; c.beginPath(); c.arc((i * 97) % w, (i * 53) % (h * 0.8), 1 + (i % 3) * 0.5, 0, 7); c.fill(); }
-        c.globalAlpha = 1; c.fillStyle = '#fff5cf'; c.beginPath(); c.arc(190, 60, 24, 0, 7); c.fill();
-        c.fillStyle = cols[0]; c.beginPath(); c.arc(178, 52, 21, 0, 7); c.fill();
-      } else {
-        c.fillStyle = mode === 'dusk' ? '#ffe0a0' : '#fff7c4'; c.beginPath(); c.arc(190, mode === 'dusk' ? 150 : 60, 24, 0, 7); c.fill();
-        c.fillStyle = 'rgba(255,255,255,.9)';
-        for (const [x, y, r] of [[60, 60, 20], [86, 52, 26], [114, 62, 18], [176, 96, 12], [192, 92, 15]]) { c.beginPath(); c.arc(x, y, r, 0, 7); c.fill(); }
-      }
-      // 遠山與近處的樹叢,窗外才不會只有天空
-      const land = { night: ['#232a55', '#161b3a'], dusk: ['#7d5a8c', '#4b3a66'], day: ['#8fcf8a', '#5fae6a'] }[mode];
-      c.fillStyle = land[0]; c.beginPath(); c.moveTo(0, h); c.lineTo(0, h * 0.74); c.quadraticCurveTo(w * 0.25, h * 0.58, w * 0.5, h * 0.72); c.quadraticCurveTo(w * 0.78, h * 0.86, w, h * 0.66); c.lineTo(w, h); c.fill();
-      c.fillStyle = land[1]; c.beginPath(); c.moveTo(0, h); c.lineTo(0, h * 0.88);
-      for (let i = 0; i <= 8; i++) c.quadraticCurveTo((i + 0.5) * w / 8 - w / 16, h * (0.8 + (i % 3) * 0.02), (i + 1) * w / 8, h * 0.9);
-      c.lineTo(w, h); c.fill();
-    });
-    // Kenney 的窗框(直立窗),左右各一扇,後面襯一片天空
-    const S = 2.3;
-    for (const cx of [0.55, 1.45]) {
-      put(g, 'window', S, cx - 0.4977 * S, 1.3 - 0.3927 * S, 0.04 * S);
-      g.add(picture(0.37 * S, 0.66 * S, sky, cx, 1.3 + 0.33 * S, 0.012));
-    }
-  },
-
-  clock(g) {
-    const m = put(g, 'clock', 1.9, 0.5, 2.5, 0.01);
-    const hand = (name) => m.getObjectByName(name);
-    const mm = hand('wall_clock_minute_hand'), hh = hand('wall_clock_hours_hand'), ss = hand('wall_clock_second_hand');
-    // 模型裡指針的原始指向(從 12 點順時針的弧度),轉到現在時間
-    const M0 = 1.01, H0 = -1.05, S0 = 3.0;
+    const hh = hand(0.016, 0.085, '#4d4c60'), mm = hand(0.011, 0.125, '#4d4c60'), ss = hand(0.005, 0.135, '#e2726f');
     g.userData.anim = () => {
-      const d = new Date(), sec = d.getSeconds(), min = d.getMinutes() + sec / 60, hr = (d.getHours() % 12) + min / 60;
-      if (mm) mm.rotation.z = -((min / 60) * Math.PI * 2 - M0);
-      if (hh) hh.rotation.z = -((hr / 12) * Math.PI * 2 - H0);
-      if (ss) ss.rotation.z = -((sec / 60) * Math.PI * 2 - S0);
+      const now = new Date(), sec = now.getSeconds(), min = now.getMinutes() + sec / 60, hr = (now.getHours() % 12) + min / 60;
+      hh.rotation.z = -(hr / 12) * Math.PI * 2; mm.rotation.z = -(min / 60) * Math.PI * 2; ss.rotation.z = -(sec / 60) * Math.PI * 2;
     };
-  },
-
+  }
 };
-// 螢幕 + 鍵盤 + 滑鼠(放在桌面上的小物)
-BUILD.monitor = (g) => {
-  const sc = kput(g, 'computerScreen', { x: 0.5, z: 0.3 });
-  g.add(picture(sc.w * 0.86, sc.h * 0.62, screenTex(), 0.5, sc.h * 0.6, 0.3 + sc.d / 2 - 0.085));
-  kput(g, 'computerKeyboard', { x: 0.44, z: 0.66 }); kput(g, 'computerMouse', { x: 0.84, z: 0.66 });
-};
-// 電視櫃 + 液晶電視
-BUILD.tv2 = (g, o = {}) => {
-  const cab = kput(g, 'cabinetTelevision', { x: 1, z: 0, c: o.c, fit: [1.9, 0.9] }); cab.piv.position.z = cab.d / 2 + 0.04;
-  const tv = kput(g, 'televisionModern', { x: 1, y: cab.h, z: cab.d / 2 + 0.04 });
-  const scr = picture(tv.w * 0.93, tv.h * 0.74, screenTex(), 1, cab.h + tv.h * 0.56, cab.d / 2 + 0.04 + 0.062);
-  g.add(scr);
-  g.userData.glowAt = new THREE.Vector3(1, cab.h + 0.4, 0.9);
-};
-for (const type of Object.keys(KIT)) BUILD[type] = (g, o) => buildKit(g, type, o);
-// 原創家具取代同名的舊模型
-BUILD.kdesk = (g, o = {}) => { sput(g, 'desk', { x: 1, z: 0.5, ry: o.side === -1 ? Math.PI : 0, c: o.c }); };
-BUILD.kchair = (g, o = {}) => { sput(g, 'chair', { x: 0.5, z: 0.5, c: o.c }); };
-BUILD.kcase = (g, o = {}) => { sput(g, 'bookcase', { x: 0.5, z: 0.2, c: o.c }); };
-BUILD.tlamp = (g, o = {}) => { sput(g, 'lamp', { x: 0.5, z: 0.5, c: o.c }); g.userData.lampAt = new THREE.Vector3(0.5, 0.36, 0.5); };
-BUILD.monitor = (g) => { sput(g, 'monitor', { x: 0.5, z: 0.5 }); };
-const SURF = { kdesk: 0.74 }; // 原創家具的檯面高度
 function buildItem(type, opt) {
   const g = new THREE.Group();
   BUILD[type]?.(g, opt);
   return g;
 }
 // 可以放小物的檯面高度(沒有就是 0 = 地板)
-function surfTop(it) {
-  if (it.type === 'desk' || it.type === 'pc') return 0.82;
-  if (SURF[it.type]) return SURF[it.type];
-  if (it.type === 'tv2') return 0;
-  const k = KIT[it.type];
-  return !k?.surf ? 0 : k.surf !== 1 ? k.surf : (KBB[k.m].max.y - KBB[k.m].min.y) * kScale(it.type); // surf 是數字時直接當檯面高度(例如床墊)
-}
+const surfTop = (it) => ITEMS[it.type]?.surf || 0;
 function surfAt(x, y) {
   let top = 0;
   for (const it of room.items) {
@@ -662,8 +475,8 @@ function surfAt(x, y) {
 }
 
 // ---------- 座位:椅子自動朝向最近的桌子,專注時角色會走過去坐下 ----------
-const SEAT_TYPES = { chair: 0.44, stool: 0.42, armchair: 0.4, kchair: 0.5, cchair: 0.46, mchair: 0.46, lchair: 0.4, bench: 0.46 }; // 座面高度
-const DESK_TYPES = ['desk', 'pc', 'table', 'kdesk', 'dining'];
+const SEAT_TYPES = Object.fromEntries(Object.entries(ITEMS).filter(([, k]) => k.seat).map(([t, k]) => [t, k.seat])); // 座面高度
+const DESK_TYPES = ['kdesk', 'dining'];
 let seats = []; // {id, x, z, face, h}
 // 家具的旋轉(r = 0–3,每格 90 度)與旋轉後的佔地
 const rotOf = (r) => (((r | 0) % 4) + 4) % 4;
@@ -854,7 +667,7 @@ function poseAvatar(g, dt, st) {
   if (mode === 'sit') g.localToWorld(tmpV2.set(0, 0.8, 0.55)); else tmpV2.copy(camera.position);
   u.gaze.position.lerp(tmpV2, dt ? Math.min(1, dt * 4) : 1);
   // 沒有空椅子時自備的小凳子、看書時手上的書
-  if (!u.seat && MODEL.chair_stool) u.seat = put(g, 'chair_stool', 0.62, 0, 0, 0);
+  if (!u.seat && modelsLoaded) u.seat = sput(g, 'stool');
   if (u.seat) u.seat.visible = mode === 'sit' && !!st.ownStool;
   if (!u.book) {
     u.book = new THREE.Group();
@@ -910,10 +723,7 @@ function buildShell() {
   ceil.rotation.x = Math.PI / 2; ceil.position.set(COLS / 2, WALLH, ROWS / 2);
   roomGroup.add(ceil);
   // 房門(在前牆上,純裝飾)
-  const door = new THREE.Group();
-  door.add(box(1.0, 2.25, 0.06, '#b98352', 0, 0, 0, 0.02), box(1.16, 2.33, 0.04, tm, 0, 0, 0.02, 0.01), sph(0.045, '#e9c46a', -0.36, 1.08, -0.05));
-  door.position.set(COLS - 1.3, 0, ROWS - 0.03);
-  roomGroup.add(door);
+  sput(roomGroup, 'door', { x: COLS - 1.3, z: ROWS, ry: Math.PI });
   add(box(COLS + th * 2, 0.45, ROWS + th * 2, tm, COLS / 2, -0.451, ROWS / 2, 0.06));
   floorMesh = new THREE.Mesh(new THREE.PlaneGeometry(COLS, ROWS), new THREE.MeshStandardMaterial({ roughness: 0.75 }));
   floorMesh.rotation.x = -Math.PI / 2; floorMesh.position.set(COLS / 2, 0, ROWS / 2); floorMesh.receiveShadow = true;
@@ -943,7 +753,7 @@ function wrapItem(inner, type, face) {
   return g;
 }
 function rebuildRoom() {
-  if (!room || !MODEL[MODEL_NAMES[0]]) return;
+  if (!room || !modelsLoaded) return;
   if (!floorMesh) buildShell();
   const [wc, wt] = WALLS[room.wall] || WALLS[0];
   wallMats[0].color.set(wc); wallMats[1].color.set(wt);
@@ -955,18 +765,14 @@ function rebuildRoom() {
   for (const it of room.items) {
     if (!CATALOG[it.type]) continue;
     let opt, face = rotOf(it.r) * Math.PI / 2;
-    if (it.type === 'desk' || it.type === 'pc' || it.type === 'kdesk') { // 筆電或螢幕擺在有椅子的那一側;工作桌的抽屜面也朝向椅子
+    if (it.type === 'kdesk') { // 工作桌的抽屜面朝向椅子
       const st = seats.find((q) => q.desk === it.id);
-      if (st) { const [lx, lz] = toLocal(it, st.x, st.z); opt = { side: lz > 0.5 ? 1 : -1, sx: Math.min(1.6, Math.max(0.4, lx)) }; }
-    }
-    if (it.type === 'desk' || it.type === 'pc') { // 桌上擺了小物就清掉內建的雜物
-      const [W, H] = dimsOf(it.type, it.r);
-      if (room.items.some((q) => CATALOG[q.type]?.kind === 'top' && q.x >= it.x && q.x < it.x + W && q.y >= it.y && q.y < it.y + H)) opt = { ...opt, clear: true };
+      if (st) opt = { side: toLocal(it, st.x, st.z)[1] > 0.5 ? 1 : -1 };
     }
     if (it.c) opt = { ...opt, c: it.c };
     const inner = buildItem(it.type, opt);
     const st = seats.find((q) => q.id === it.id);
-    if (st) { face = st.face; if (st.desk != null) inner.position.z += it.type === 'kchair' ? 0.27 : CHAIR_FWD; } // 椅子自動轉向它面對的桌子,並往桌子拉近
+    if (st) { face = st.face; if (st.desk != null) inner.position.z += ITEMS[it.type].pull || CHAIR_FWD; } // 椅子自動轉向它面對的桌子,並往桌子拉近
     if (inner.userData.lampAt && lamps++ < 5) {
       const l = new THREE.PointLight(0xffc27a, MOODS[mood].lamp, 4.5, 1.6); l.position.copy(inner.userData.lampAt); inner.add(l);
       lampLights.push(l);
@@ -1319,7 +1125,7 @@ window.addEventListener('keydown', (ev) => {
   if ((ev.key === 'r' || ev.key === 'R') && holding && !typing) rotateHolding();
   if ((ev.key === 'c' || ev.key === 'C') && holding && !typing) tintHolding();
 });
-const canTint = (type) => type === 'tv2' || (!!KIT[type] && !/machine|pinball/.test(KIT[type].m));
+const canTint = (type) => !!RUGS[type] || !!(ITEMS[type] && STINT[ITEMS[type].m]);
 function tintHolding() {
   if (!holding || !canTint(holding.type)) return;
   const keep = hover;

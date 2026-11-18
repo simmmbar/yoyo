@@ -13,79 +13,62 @@ const COLS = 6, ROWS = 5, MAX_ITEMS = 110, MAX_ROOM_PLAYERS = 12;
 // kind: floor(佔地板格) / rug(鋪在地上,可被踩與疊放) / wall(掛在牆上) / top(小物:放在桌面、櫃子上,或直接放地上)
 // g: 佈置面板的分類
 const CATALOG = {
-  pc:        { name: '電腦桌',   w: 2, h: 1, g: 'desk', kind: 'floor' },
-  desk:      { name: '書桌',     w: 2, h: 1, g: 'desk', kind: 'floor' },
-  chair:     { name: '椅子',     w: 1, h: 1, g: 'desk', kind: 'floor' },
-  plant:     { name: '盆栽',     w: 1, h: 1, g: 'deco', kind: 'floor' },
-  rug:       { name: '條紋地毯', w: 3, h: 2, g: 'rug', kind: 'rug' },
-  clock:     { name: '時鐘',     w: 1, h: 1, g: 'wall', kind: 'wall' },
-  lamp:      { name: '立燈',     w: 1, h: 1, g: 'deco', kind: 'floor' },
-  rug2:      { name: '圓地毯',   w: 3, h: 2, g: 'rug', kind: 'rug' },
-  stool:     { name: '小凳子',   w: 1, h: 1, g: 'desk', kind: 'floor' },
-  window:    { name: '窗戶',     w: 2, h: 1, g: 'wall', kind: 'wall' },
-  table:     { name: '小桌',     w: 1, h: 1, g: 'desk', kind: 'floor' },
-  shelf:     { name: '壁掛書架', w: 2, h: 1, g: 'wall', kind: 'wall' },
-  poster:    { name: '海報',     w: 1, h: 1, g: 'wall', kind: 'wall' },
-  neon:      { name: '霓虹燈',   w: 1, h: 1, g: 'wall', kind: 'wall' },
-  painting:  { name: '掛畫',     w: 1, h: 1, g: 'wall', kind: 'wall' },
-  cabinet:   { name: '床頭櫃',   w: 1, h: 1, g: 'store', kind: 'floor' },
-  bookshelf: { name: '置物櫃',   w: 2, h: 1, g: 'store', kind: 'floor' },
-  tree:      { name: '仙人掌',   w: 1, h: 1, g: 'deco', kind: 'floor' },
-  armchair:  { name: '單人沙發', w: 1, h: 1, g: 'rest', kind: 'floor' },
-  sofa:      { name: '沙發',     w: 2, h: 1, g: 'rest', kind: 'floor' },
-  bed:       { name: '床',       w: 1, h: 2, g: 'rest', kind: 'floor' },
-  tv:        { name: '電視',     w: 1, h: 1, g: 'elec', kind: 'floor' },
-  cat:       { name: '貓咪',     w: 1, h: 1, g: 'deco', kind: 'floor' },
-  // ---- Kenney Furniture Kit / Mini Arcade(CC0),比例較修長 ----
-  kdesk:    { name: '工作桌',     w: 2, h: 1, g: 'desk', kind: 'floor' },
-  kchair:   { name: '電腦椅',     w: 1, h: 1, g: 'desk', kind: 'floor' },
-  cchair:   { name: '軟墊椅',     w: 1, h: 1, g: 'desk', kind: 'floor' },
-  mchair:   { name: '鐵腳椅',     w: 1, h: 1, g: 'desk', kind: 'floor' },
-  barstool: { name: '高腳凳',     w: 1, h: 1, g: 'desk', kind: 'floor' },
-  dining:   { name: '長桌',       w: 2, h: 1, g: 'desk', kind: 'floor' },
-  coffee:   { name: '茶几',       w: 2, h: 1, g: 'desk', kind: 'floor' },
-  side:     { name: '邊桌',       w: 1, h: 1, g: 'desk', kind: 'floor' },
-  kcase:    { name: '開放書櫃',   w: 1, h: 1, g: 'store', kind: 'floor' },
-  doorcase: { name: '門片書櫃',   w: 1, h: 1, g: 'store', kind: 'floor' },
-  widecase: { name: '寬書櫃',     w: 2, h: 1, g: 'store', kind: 'floor' },
-  lowcase:  { name: '矮櫃',       w: 1, h: 1, g: 'store', kind: 'floor' },
-  rack:     { name: '衣帽架',     w: 1, h: 1, g: 'store', kind: 'floor' },
-  box:      { name: '紙箱',       w: 1, h: 1, g: 'store', kind: 'floor' },
-  dbed:     { name: '雙人床',     w: 2, h: 2, g: 'rest', kind: 'floor' },
-  bunk:     { name: '上下舖',     w: 1, h: 2, g: 'rest', kind: 'floor' },
-  ksofa:    { name: '布沙發',     w: 2, h: 1, g: 'rest', kind: 'floor' },
-  dsofa:    { name: '設計沙發',   w: 2, h: 1, g: 'rest', kind: 'floor' },
-  lchair:   { name: '休閒椅',     w: 1, h: 1, g: 'rest', kind: 'floor' },
-  ottoman:  { name: '腳凳',       w: 1, h: 1, g: 'rest', kind: 'floor' },
-  bench:    { name: '長椅',       w: 1, h: 1, g: 'rest', kind: 'floor' },
-  tv2:      { name: '液晶電視',   w: 2, h: 1, g: 'elec', kind: 'floor' },
-  fridge:   { name: '冰箱',       w: 1, h: 1, g: 'elec', kind: 'floor' },
-  spk:      { name: '落地喇叭',   w: 1, h: 1, g: 'elec', kind: 'floor' },
-  arcade:   { name: '大型電玩',   w: 1, h: 1, g: 'elec', kind: 'floor' },
-  vending:  { name: '販賣機',     w: 1, h: 1, g: 'elec', kind: 'floor' },
-  claw:     { name: '夾娃娃機',   w: 1, h: 1, g: 'elec', kind: 'floor' },
-  pinball:  { name: '彈珠台',     w: 1, h: 2, g: 'elec', kind: 'floor' },
-  flamp:    { name: '圓罩立燈',   w: 1, h: 1, g: 'deco', kind: 'floor' },
-  flamp2:   { name: '方罩立燈',   w: 1, h: 1, g: 'deco', kind: 'floor' },
-  bigplant: { name: '大盆栽',     w: 1, h: 1, g: 'deco', kind: 'floor' },
-  bin:      { name: '垃圾桶',     w: 1, h: 1, g: 'deco', kind: 'floor' },
-  monitor:  { name: '螢幕鍵盤',   w: 1, h: 1, g: 'top', kind: 'top' },
-  tlaptop:  { name: '筆電',       w: 1, h: 1, g: 'top', kind: 'top' },
-  tbooks:   { name: '書堆',       w: 1, h: 1, g: 'top', kind: 'top' },
-  tplant:   { name: '小盆栽',     w: 1, h: 1, g: 'top', kind: 'top' },
-  tplant2:  { name: '多肉盆栽',   w: 1, h: 1, g: 'top', kind: 'top' },
-  tlamp:    { name: '檯燈',       w: 1, h: 1, g: 'top', kind: 'top' },
-  radio:    { name: '收音機',     w: 1, h: 1, g: 'top', kind: 'top' },
-  tspk:     { name: '小喇叭',     w: 1, h: 1, g: 'top', kind: 'top' },
-  brew:     { name: '咖啡機',     w: 1, h: 1, g: 'top', kind: 'top' },
-  obox:     { name: '打開的紙箱', w: 1, h: 1, g: 'top', kind: 'top' },
-  wlamp:    { name: '壁燈',       w: 1, h: 1, g: 'wall', kind: 'wall' },
-  mirror:   { name: '鏡子',       w: 1, h: 1, g: 'wall', kind: 'wall' },
-  wcab:     { name: '吊櫃',       w: 1, h: 1, g: 'wall', kind: 'wall' },
-  rround:   { name: '圓形地毯',   w: 2, h: 2, g: 'rug', kind: 'rug' },
-  rsquare:  { name: '方形地毯',   w: 2, h: 2, g: 'rug', kind: 'rug' },
-  rbig:     { name: '大地毯',     w: 3, h: 2, g: 'rug', kind: 'rug' },
-  mat:      { name: '門墊',       w: 1, h: 1, g: 'rug', kind: 'rug' },
+  kdesk:    { name: '工作桌',   w: 2, h: 1, g: 'desk', kind: 'floor' },
+  dining:   { name: '長桌',     w: 2, h: 1, g: 'desk', kind: 'floor' },
+  coffee:   { name: '茶几',     w: 2, h: 1, g: 'desk', kind: 'floor' },
+  side:     { name: '邊桌',     w: 1, h: 1, g: 'desk', kind: 'floor' },
+  kchair:   { name: '電腦椅',   w: 1, h: 1, g: 'desk', kind: 'floor' },
+  cchair:   { name: '木椅',     w: 1, h: 1, g: 'desk', kind: 'floor' },
+  stool:    { name: '圓凳',     w: 1, h: 1, g: 'desk', kind: 'floor' },
+  kcase:    { name: '開放書櫃', w: 1, h: 1, g: 'store', kind: 'floor' },
+  doorcase: { name: '門片書櫃', w: 1, h: 1, g: 'store', kind: 'floor' },
+  widecase: { name: '寬矮櫃',   w: 2, h: 1, g: 'store', kind: 'floor' },
+  lowcase:  { name: '矮櫃',     w: 1, h: 1, g: 'store', kind: 'floor' },
+  rack:     { name: '衣帽架',   w: 1, h: 1, g: 'store', kind: 'floor' },
+  box:      { name: '紙箱',     w: 1, h: 1, g: 'store', kind: 'floor' },
+  bed:      { name: '單人床',   w: 1, h: 2, g: 'rest', kind: 'floor' },
+  dbed:     { name: '雙人床',   w: 2, h: 2, g: 'rest', kind: 'floor' },
+  ksofa:    { name: '沙發',     w: 2, h: 1, g: 'rest', kind: 'floor' },
+  lchair:   { name: '單人沙發', w: 1, h: 1, g: 'rest', kind: 'floor' },
+  ottoman:  { name: '腳凳',     w: 1, h: 1, g: 'rest', kind: 'floor' },
+  tv2:      { name: '電視',     w: 2, h: 1, g: 'elec', kind: 'floor' },
+  fridge:   { name: '冰箱',     w: 1, h: 1, g: 'elec', kind: 'floor' },
+  spk:      { name: '落地喇叭', w: 1, h: 1, g: 'elec', kind: 'floor' },
+  arcade:   { name: '大型電玩', w: 1, h: 1, g: 'elec', kind: 'floor' },
+  vending:  { name: '販賣機',   w: 1, h: 1, g: 'elec', kind: 'floor' },
+  flamp:    { name: '立燈',     w: 1, h: 1, g: 'deco', kind: 'floor' },
+  bigplant: { name: '大盆栽',   w: 1, h: 1, g: 'deco', kind: 'floor' },
+  plant:    { name: '盆栽',     w: 1, h: 1, g: 'deco', kind: 'floor' },
+  bin:      { name: '垃圾桶',   w: 1, h: 1, g: 'deco', kind: 'floor' },
+  cat:      { name: '貓咪',     w: 1, h: 1, g: 'deco', kind: 'floor' },
+  monitor:  { name: '螢幕鍵盤', w: 1, h: 1, g: 'top', kind: 'top' },
+  tlaptop:  { name: '筆電',     w: 1, h: 1, g: 'top', kind: 'top' },
+  tlamp:    { name: '檯燈',     w: 1, h: 1, g: 'top', kind: 'top' },
+  tbooks:   { name: '書堆',     w: 1, h: 1, g: 'top', kind: 'top' },
+  tplant:   { name: '小盆栽',   w: 1, h: 1, g: 'top', kind: 'top' },
+  tplant2:  { name: '多肉盆栽', w: 1, h: 1, g: 'top', kind: 'top' },
+  radio:    { name: '收音機',   w: 1, h: 1, g: 'top', kind: 'top' },
+  brew:     { name: '茶具組',   w: 1, h: 1, g: 'top', kind: 'top' },
+  window:   { name: '窗戶',     w: 2, h: 1, g: 'wall', kind: 'wall' },
+  painting: { name: '掛畫',     w: 1, h: 1, g: 'wall', kind: 'wall' },
+  poster:   { name: '海報',     w: 1, h: 1, g: 'wall', kind: 'wall' },
+  clock:    { name: '時鐘',     w: 1, h: 1, g: 'wall', kind: 'wall' },
+  shelf:    { name: '壁掛層板', w: 2, h: 1, g: 'wall', kind: 'wall' },
+  neon:     { name: '霓虹燈',   w: 1, h: 1, g: 'wall', kind: 'wall' },
+  wlamp:    { name: '壁燈',     w: 1, h: 1, g: 'wall', kind: 'wall' },
+  mirror:   { name: '鏡子',     w: 1, h: 1, g: 'wall', kind: 'wall' },
+  rug:      { name: '條紋地毯', w: 3, h: 2, g: 'rug', kind: 'rug' },
+  rug2:     { name: '橢圓地毯', w: 3, h: 2, g: 'rug', kind: 'rug' },
+  rround:   { name: '圓形地毯', w: 2, h: 2, g: 'rug', kind: 'rug' },
+  rsquare:  { name: '菱紋地毯', w: 2, h: 2, g: 'rug', kind: 'rug' },
+  rbig:     { name: '大地毯',   w: 3, h: 2, g: 'rug', kind: 'rug' },
+  mat:      { name: '門墊',     w: 1, h: 1, g: 'rug', kind: 'rug' },
+};
+// 舊版家具換成現在對應的款式(舊存檔載入時轉換)
+const ALIAS = {
+  desk: 'kdesk', pc: 'kdesk', chair: 'cchair', mchair: 'cchair', bench: 'cchair', barstool: 'stool', table: 'side', cabinet: 'side',
+  bookshelf: 'widecase', sofa: 'ksofa', dsofa: 'ksofa', armchair: 'lchair', bunk: 'bed', tv: 'tv2', claw: 'arcade', pinball: 'arcade',
+  lamp: 'flamp', flamp2: 'flamp', tree: 'bigplant', tspk: 'radio', obox: 'box', wcab: 'painting', aquarium: 'tv2', bear: 'tplant',
 };
 const AVATAR_RANGES = { skin: 5, hair: 6, hairColor: 7, shirt: 8, acc: 5 };
 const POSES = 4; // 專注姿勢:0 打字、1 站著、2 看書、3 寫字
@@ -103,7 +86,7 @@ const loadJson = (f) => {
 const profiles = loadJson('profiles.json'); // key(sha256 of token) -> profile
 const rooms = loadJson('rooms.json');       // code -> room
 // 舊存檔相容:魚缸已改為電視
-for (const r of Object.values(rooms)) for (const it of r.items || []) if (it.type === 'aquarium') it.type = 'tv';
+for (const r of Object.values(rooms)) for (const it of r.items || []) if (ALIAS[it.type]) { it.type = ALIAS[it.type]; delete it.c; }
 // 舊存檔相容:房間從 8×6 縮成 6×5,放不下的舊房間換成預設書房(在 PRESETS 定義之後執行)
 const migrateRooms = () => { for (const r of Object.values(rooms)) if ((r.items || []).some((it) => !CATALOG[it.type] || it.x + dims(it.type, it.r)[0] > COLS || (CATALOG[it.type].kind !== 'wall' && it.y + dims(it.type, it.r)[1] > ROWS))) { r.items = presetItems('study'); r.nextId = r.items.length + 1; markDirty(); } };
 // 舊存檔相容:舊版的專注紀錄沒有模式欄位,直接清掉
@@ -163,9 +146,9 @@ const PRESETS = {
     ['window', 2, 0], ['poster', 0, 0], ['painting', 1, 0], ['wlamp', 4, 0], ['clock', 5, 0],
   ] },
   bedroom: { name: '臥室', wall: 2, floor: 2, items: [
-    ['dbed', 0, 0, 0, 5], ['side', 2, 0], ['kdesk', 3, 0, 0, 4], ['kcase', 5, 0, 0, 4], ['kchair', 3, 1], ['bin', 4, 1],
+    ['dbed', 0, 0, 0, 5], ['side', 2, 0], ['kdesk', 3, 0, 0, 4], ['kcase', 5, 0, 0, 4], ['kchair', 3, 1], ['plant', 4, 1],
     ['lowcase', 5, 2, 3, 4], ['arcade', 5, 3, 3], ['lchair', 0, 2, 1, 5], ['ottoman', 1, 2, 0, 5], ['box', 0, 4], ['bigplant', 5, 4],
-    ['monitor', 3, 0], ['tbooks', 4, 0], ['tlamp', 2, 0], ['radio', 5, 2, 3], ['obox', 1, 4],
+    ['monitor', 3, 0], ['tbooks', 4, 0], ['tlamp', 2, 0], ['radio', 5, 2, 3], ['bin', 1, 4],
     ['rround', 1, 2, 0, 6], ['mat', 4, 4],
     ['window', 0, 0], ['neon', 2, 0], ['shelf', 3, 0], ['clock', 5, 0],
   ] },
@@ -589,10 +572,10 @@ const server = http.createServer((req, res) => {
   const ad = /^\/vendor\/addons\/((?:[\w-]+\/)*[\w-]+\.js)$/.exec(url);
   if (ad) { hit = [null, 'text/javascript; charset=utf-8']; file = path.join(THREE_DIR, 'examples/jsm', ad[1]); }
   if (url === '/vendor/three-vrm.js') { hit = [null, 'text/javascript; charset=utf-8']; file = path.join(__dirname, 'node_modules/@pixiv/three-vrm/lib/three-vrm.module.min.js'); }
-  // 家具與角色模型(KayKit、VRoid 範例角色等,皆為 CC0)
-  const as = /^\/assets\/(kaykit|kenney|studio|avatars|extra|music)\/((?:[Tt]extures\/)?[\w-]+\.(gltf|glb|vrm|bin|png|jpg|txt|mp3))$/.exec(url);
+  // 家具(原創)、角色模型(VRoid 範例角色,CC0)、音樂(CC0)
+  const as = /^\/assets\/(studio|avatars|music)\/([\w-]+\.(glb|vrm|txt|mp3))$/.exec(url);
   if (as) {
-    const types = { gltf: 'model/gltf+json', glb: 'model/gltf-binary', vrm: 'application/octet-stream', bin: 'application/octet-stream', png: 'image/png', jpg: 'image/jpeg', txt: 'text/plain; charset=utf-8', mp3: 'audio/mpeg' };
+    const types = { glb: 'model/gltf-binary', vrm: 'application/octet-stream', txt: 'text/plain; charset=utf-8', mp3: 'audio/mpeg' };
     hit = [null, types[as[3]]]; file = path.join(__dirname, 'public/assets', as[1], as[2]);
   }
   if (!hit) return res.writeHead(404).end('Not found');
