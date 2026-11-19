@@ -823,6 +823,23 @@ def cat():
     return m
 
 
+def cat_walk():
+    """站著走路的貓(和趴坐的貓同一隻):四隻腳、翹起來的尾巴。臉朝 -Y。"""
+    m = Model('cat_walk')
+    m.ball(0.13, (0, 0.04, 0.24), 'cream', scale=(0.9, 1.75, 0.85))                           # 身體
+    m.ball(0.105, (0, -0.24, 0.33), 'cream', scale=(1.08, 0.95, 0.92))                         # 頭
+    for sx in (-1, 1):
+        m.cyl(0.042, 0.004, 0.075, (sx * 0.062, -0.23, 0.435), 'woodDark', segs=10, rot=(0, sx * 0.25, 0))
+        m.ball(0.014, (sx * 0.042, -0.332, 0.342), 'dark', scale=(1, 0.5, 1.25), outline=False)
+        for sy in (-0.1, 0.19):                                                              # 四隻腳
+            m.cyl(0.03, 0.034, 0.17, (sx * 0.07, sy, 0.085), 'cream', segs=10, bevel=0.012)
+    m.ball(0.011, (0, -0.342, 0.313), 'pink', scale=(1.3, 0.6, 0.9), outline=False)
+    for k in range(7):                                                                       # 往上翹的尾巴
+        m.ball(0.034 - k * 0.002, (0, 0.26 + k * 0.012 - k * k * 0.004, 0.27 + k * 0.045), 'woodDark', outline=(k % 2 == 0))
+    m.ball(0.06, (0.02, 0.08, 0.335), 'woodDark', scale=(1.2, 1.5, 0.35), outline=False)       # 背上的花斑
+    return m
+
+
 # ---------------- 桌上小物 ----------------
 
 def laptop():
@@ -913,7 +930,7 @@ ALL = {
     'bed': lambda: bed('bed', 0.95), 'bed_double': lambda: bed('bed_double', 1.85),
     'sofa': lambda: sofa('sofa', 1.85), 'armchair': lambda: sofa('armchair', 0.92, pillows=False), 'ottoman': ottoman,
     'tv': tv, 'fridge': fridge, 'speaker': speaker, 'arcade': arcade, 'vending': vending,
-    'floorlamp': floorlamp, 'plant_big': plant_big, 'plant': plant, 'bin': bin_, 'cat': cat,
+    'floorlamp': floorlamp, 'plant_big': plant_big, 'plant': plant, 'bin': bin_, 'cat': cat, 'cat_walk': cat_walk,
     'laptop': laptop, 'books': books, 'plant_small': plant_small, 'succulent': succulent, 'radio': radio, 'teaset': teaset,
 }
 

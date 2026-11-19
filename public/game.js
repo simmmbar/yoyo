@@ -139,7 +139,13 @@ const on = {
     log.append(el('div', {}, el('b', { textContent: m.name + ' ' }), m.text));
     log.scrollTop = log.scrollHeight;
   },
-  emote(m) { const p = players.get(m.id); if (p) showEmote(p, m.e); },
+  emote(m) {
+    const p = players.get(m.id);
+    if (!p) return;
+    showEmote(p, m.e);
+    p.happyUntil = performance.now() + 1800; // 發表情時角色會笑一下;👋 會揮手
+    if (m.e === '👋') p.waveUntil = performance.now() + 1800;
+  },
   room(m) {
     Object.assign(room, m.room);
     if (holding?.fromId && !room.items.some((i) => i.id === holding.fromId)) setHolding(null);
@@ -321,7 +327,7 @@ const ITEMS = {
   radio: { m: 'radio' }, brew: { m: 'teaset' },
   window: { m: 'window' }, painting: { m: 'frame' }, poster: { m: 'poster' }, clock: { m: 'clock' }, shelf: { m: 'wallshelf' }, wlamp: { m: 'walllamp', lamp: 1.95 }, mirror: { m: 'mirror' },
 };
-const SFILES = [...new Set(Object.values(ITEMS).map((k) => k.m)), 'door'];
+const SFILES = [...new Set(Object.values(ITEMS).map((k) => k.m)), 'door', 'cat_walk'];
 const MODEL = {}, SBB = {}, STINT = {}; // 模型、外框、可否換色
 let modelsLoaded = false;
 // 換色:有布料的家具換布料顏色,其餘換木頭顏色(0 = 原色)
@@ -525,7 +531,7 @@ for (const [type, k] of Object.entries(ITEMS)) BUILD[type] = (g, o = {}) => {
   const d = CATALOG[type], bb = SBB[k.m], wall = d.kind === 'wall';
   const z = wall ? 0 : k.back ? (bb.max.z - bb.min.z) / 2 + 0.03 : d.h / 2;
   const model = sput(g, k.m, { x: d.w / 2, z, c: o.c, ry: o.side === -1 ? Math.PI : 0 });
-  if (type === 'cat') g.userData.anim = (t) => { model.scale.set(1 - Math.sin(t / 900) * 0.012, 1 + Math.sin(t / 900) * 0.035, 1); }; // 貓咪緩緩呼吸
+  if (type === 'cat') { g.userData.cat = { rest: model, walk: sput(g, 'cat_walk', { x: d.w / 2, z }) }; g.userData.cat.walk.visible = false; }
   if (k.lamp) g.userData.lampAt = new THREE.Vector3(d.w / 2, k.lamp, wall ? 0.3 : z);
   if (k.glow) g.userData.glowAt = new THREE.Vector3(...k.glow);
   if (type === 'window' && raining) { // 玻璃後面往下流的雨絲
@@ -597,13 +603,47 @@ function computeSeats() {
   }
   seats.sort((a, b) => (a.desk != null ? 0 : 1) - (b.desk != null ? 0 : 1)); // 先坐滿書桌前的椅子,再坐其他座位
 }
+// ---------- 貓:在家附近閒晃,走一走就趴下休息 ----------
+// 位置記在 catState 裡,房間重建時貓不會瞬間跳回原位。目的地用時間和編號算出來,
+// 所以同一個房間裡每個人看到的貓大致會走到同一個地方。
+const catState = new Map(); // item id -> { x, y, path, bucket, heading }
+function catAnim(it, parts) {
+  let st = catState.get(it.id);
+  if (!st) catState.set(it.id, (st = { x: it.x + 0.5, y: it.y + 0.5, path: [], bucket: -1, heading: 0, home: [it.x, it.y] }));
+  if (st.home[0] !== it.x || st.home[1] !== it.y) Object.assign(st, { x: it.x + 0.5, y: it.y + 0.5, path: [], home: [it.x, it.y] }); // 被搬到新位置
+  let last = 0;
+  return (t) => {
+    const dt = Math.min(0.1, last ? (t - last) / 1000 : 0); last = t;
+    const bucket = Math.floor(Date.now() / 14000);
+    if (bucket !== st.bucket && !st.path.length) { // 每隔一陣子決定要不要換個地方
+      st.bucket = bucket;
+      const r = rnd01(bucket * 7.13 + it.id * 3.7);
+      if (r < 0.6) {
+        const spots = [];
+        for (let x = 0; x < COLS; x++) for (let y = 0; y < ROWS; y++) if (!blocked.has(tkey(x, y)) && Math.hypot(x - it.x, y - it.y) <= 3.2) spots.push([x + 0.5, y + 0.5]);
+        if (spots.length) { const [gx, gy] = spots[Math.floor(rnd01(bucket * 1.31 + it.id) * spots.length)]; st.path = findPath(st.x, st.y, gx, gy); }
+      }
+    }
+    const walking = st.path.length > 0;
+    if (walking) {
+      const [wx, wy] = st.path[0], dx = wx - st.x, dy = wy - st.y, d = Math.hypot(dx, dy), step = 0.75 * dt;
+      if (d <= step) { st.x = wx; st.y = wy; st.path.shift(); } else { st.x += (dx / d) * step; st.y += (dy / d) * step; st.heading = Math.atan2(dx, dy); }
+    }
+    for (const m of [parts.rest, parts.walk]) { m.position.x = st.x - it.x; m.position.z = st.y - it.y; m.rotation.y = st.heading; }
+    parts.rest.visible = !walking; parts.walk.visible = walking;
+    parts.walk.position.y = Math.abs(Math.sin(t / 95)) * 0.035;                                     // 小跳步
+    parts.walk.rotation.z = Math.sin(t / 95) * 0.05;
+    parts.rest.scale.set(1 - Math.sin(t / 900) * 0.012, 1 + Math.sin(t / 900) * 0.035, 1);          // 趴著時緩緩呼吸
+  };
+}
+
 // ---------- 走路:繞過家具,不再直接穿過去 ----------
 let blocked = new Set(); // 被家具佔住的地板格
 const tkey = (x, y) => x + ',' + y;
 function computeBlocked() {
   blocked = new Set();
   for (const it of room.items) {
-    if (CATALOG[it.type]?.kind !== 'floor') continue;
+    if (CATALOG[it.type]?.kind !== 'floor' || it.type === 'cat') continue; // 貓會自己走開,不算障礙
     const [w, h] = dimsOf(it.type, it.r);
     for (let x = it.x; x < it.x + w; x++) for (let y = it.y; y < it.y + h; y++) blocked.add(tkey(x, y));
   }
@@ -808,6 +848,10 @@ function poseAvatar(g, dt, st) {
     P.spine = [breathe, 0, sin(t * 0.7) * 0.015]; P.head = [0, sin(t * 0.31) * 0.08, 0];
     P.leftUpperLeg = [0, 0, 0.03]; P.rightUpperLeg = [0, 0, -0.03];
   }
+  if (st.waving && mode !== 'walk' && mode !== 'cheer') { // 舉起右手左右揮
+    P.rightUpperArm = [0, 0, -0.95]; P.rightLowerArm = [0, 0.75 + sin(t * 11) * 0.45, 0]; P.rightHand = [0, 0, 0];
+    P.head = [(P.head?.[0] || 0) - 0.05, P.head?.[1] || 0, -0.08];
+  }
   const k = dt ? 1 - Math.exp(-dt * (mode === 'walk' ? 18 : 9)) : 1, f = u.flip;
   for (const n of BONES) {
     const b = u.bone[n]; if (!b || n === 'hips') continue;
@@ -823,7 +867,7 @@ function poseAvatar(g, dt, st) {
     if (u.blinkAt < 0) { u.blink = 0.14; u.blinkAt = 2 + Math.random() * 4; }
     u.blink = Math.max(0, u.blink - dt);
     em.setValue('blink', u.blink > 0 ? 1 - Math.abs(u.blink - 0.07) / 0.07 : 0);
-    em.setValue('happy', mode === 'cheer' ? 1 : 0);
+    em.setValue('happy', mode === 'cheer' || st.happy ? 1 : 0);
   }
   // 視線:站著時看鏡頭,坐著時看桌面
   if (mode === 'sit') g.localToWorld(tmpV2.set(0, 0.8, 0.55)); else tmpV2.copy(camera.position);
@@ -982,6 +1026,7 @@ function rebuildRoom() {
       inner.add(l, l.target); beamLights.push(l);
     }
     if (inner.userData.anim) anims.push(inner.userData.anim);
+    if (inner.userData.cat) { anims.push(catAnim(it, inner.userData.cat)); face = 0; } // 貓自己決定面向
     const g = wrapItem(inner, it.type, face);
     itemPos(g, it.type, it.x, it.y);
     if (CATALOG[it.type].kind === 'top') g.position.y = surfAt(it.x, it.y);
@@ -989,6 +1034,7 @@ function rebuildRoom() {
     itemsGroup.add(g);
   }
   for (const l of lampLights) l.intensity = lampLevel() * l.userData.k;
+  for (const id of catState.keys()) if (!room.items.some((q) => q.id === id && q.type === 'cat')) catState.delete(id);
   syncGhost();
 }
 
@@ -1251,7 +1297,7 @@ function frame(t) {
     const fwd = sitting && p.seat ? p.seat.fwd : 0;
     p.sit = (p.sit || 0) + (fwd - (p.sit || 0)) * Math.min(1, dt * 8);
     p.obj.position.set(p.x + Math.sin(p.obj.rotation.y) * p.sit, 0, p.y + Math.cos(p.obj.rotation.y) * p.sit);
-    poseAvatar(p.obj, dt, { walking, sitting, pose: p.pose, noDesk: !p.seat || p.seat.desk == null, cheering: p.cheerUntil > t, seatH: p.seat?.h, ownStool: !p.seat, t });
+    poseAvatar(p.obj, dt, { walking, sitting, pose: p.pose, waving: p.waveUntil > t, happy: p.happyUntil > t, noDesk: !p.seat || p.seat.desk == null, cheering: p.cheerUntil > t, seatH: p.seat?.h, ownStool: !p.seat, t });
     p.labelY = (p.labelY || AVATAR_H) + ((sitting ? 1.42 : AVATAR_H) - (p.labelY || AVATAR_H)) * Math.min(1, dt * 6);
     // 標籤
     tmpV.set(p.x, p.labelY + 0.14, p.y).project(camera);
@@ -1641,8 +1687,15 @@ let photoJob = null;
 function takeGroupPhoto(m) {
   chime();
   applyView('room');
-  photoJob = { at: performance.now() + 2600, minutes: m.minutes, ids: m.done.map((d) => d.id) };
+  photoJob = { at: performance.now() + 2600, ids: m.done.map((d) => d.id), title: '共同專注完成,來張合照!', caption: `${m.done.length} 人共同專注 ${m.minutes} 分鐘` };
 }
+// 隨時拍一張:照目前的鏡頭角度,把房間和大家的名字存成圖片
+$('#snapBtn').addEventListener('click', () => {
+  if (!room || photoJob) return;
+  const f = myFocus(), n = players.size;
+  photoJob = { at: performance.now(), ids: [...players.keys()], keepView: true, title: '拍好了',
+    caption: f && f.phase === 'focus' ? (n > 1 ? `${n} 人一起專注中` : '專注中') : n > 1 ? `${n} 人的自習室` : '我的自習室' };
+});
 function composePhoto(job) {
   try {
     const W = canvas.width, H = canvas.height, k = W / (stage.clientWidth || W);
@@ -1664,12 +1717,13 @@ function composePhoto(job) {
     c.textAlign = 'left'; c.font = `700 ${22 * k}px system-ui, "PingFang TC", "Noto Sans TC", sans-serif`;
     c.fillStyle = '#ffc98a'; c.fillText('☾ 悠悠自習室', 24 * k, H - 56 * k);
     c.font = `${16 * k}px system-ui, "PingFang TC", "Noto Sans TC", sans-serif`; c.fillStyle = '#f6efe6';
-    c.fillText(`${job.ids.length} 人共同專注 ${job.minutes} 分鐘 · ${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`, 24 * k, H - 26 * k);
+    c.fillText(`${job.caption} · ${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`, 24 * k, H - 26 * k);
+    $('#photoTitle').textContent = job.title;
     const url = cv.toDataURL('image/jpeg', 0.9);
     $('#photoImg').src = url; $('#photoSave').href = url;
     $('#photo').hidden = false;
   } catch (e) { console.error(e); }
-  setView(view); // 鏡頭回到原本的視角
+  if (!job.keepView) setView(view); // 合照時鏡頭拉到全景,拍完回到原本的視角
 }
 $('#photoClose').addEventListener('click', () => { $('#photo').hidden = true; });
 

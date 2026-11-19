@@ -20,6 +20,7 @@
   <h1><span class="moon">☾</span> 悠悠自習室</h1>
   <span class="chip" id="roomChip">房號 <b id="roomCode">------</b></span>
   <button class="chip btn" id="copyLink">邀請朋友</button>
+  <button class="chip btn" id="snapBtn" title="照目前的畫面拍一張照片">拍照</button>
   <button class="chip btn" id="goHome" hidden>回我的房間</button>
   <span class="chip">在線 <b id="online">0</b></span>
   <div class="views" id="views" role="group" aria-label="視角">
@@ -220,7 +221,7 @@
 </aside>
 <div id="photo" hidden>
   <div class="photoBox">
-    <b>共同專注完成,來張合照!</b>
+    <b id="photoTitle">共同專注完成,來張合照!</b>
     <img id="photoImg" alt="共同專注合照">
     <div class="row"><a id="photoSave" class="btnlike primary" download="yoyo-focus.jpg">下載合照</a><button id="photoClose">關閉</button></div>
   </div>
