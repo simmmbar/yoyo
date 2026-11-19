@@ -595,7 +595,7 @@ const server = http.createServer((req, res) => {
       fs.createReadStream(full, { start, end }).pipe(res);
     });
   }
-  const gz = /gzip/.test(req.headers['accept-encoding'] || '') && /javascript|html|css|json|octet-stream|plain/.test(hit[1]);
+  const gz = /gzip/.test(req.headers['accept-encoding'] || '') && /javascript|html|css|json|octet-stream|gltf-binary|plain/.test(hit[1]);
   if (gz && GZ.has(full)) return res.writeHead(200, { ...headers, 'Content-Encoding': 'gzip', Vary: 'Accept-Encoding' }).end(GZ.get(full));
   fs.readFile(full, (err, buf) => {
     if (err) return res.writeHead(err.code === 'ENOENT' ? 404 : 500).end('error');

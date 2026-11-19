@@ -62,6 +62,7 @@ function connect() {
   ws.onopen = () => send({ t: 'hello', token, tz: -new Date().getTimezoneOffset(), room: new URLSearchParams(location.search).get('room') || '' });
   ws.onmessage = (ev) => { const m = JSON.parse(ev.data); on[m.t]?.(m); };
   ws.onclose = () => {
+    netReady = false;
     if (kicked) return;
     $('#overlay').hidden = false;
     $('#overlayText').textContent = '連線中斷,重新連線中…';
@@ -69,6 +70,14 @@ function connect() {
   };
 }
 
+// 載入畫面:連上線、家具模型也都載完才收起來,過程中顯示進度
+let netReady = false, loadedN = 0;
+function refreshOverlay() {
+  if (kicked) return;
+  const done = netReady && modelsLoaded;
+  $('#overlay').hidden = done;
+  if (!done) $('#overlayText').textContent = netReady ? `正在佈置房間… ${Math.round((loadedN / SFILES.length) * 100)}%` : '連線中…';
+}
 function addPlayer(p) {
   const old = players.get(p.id);
   const o = old || { x: p.x, y: p.y };
@@ -92,7 +101,7 @@ const on = {
     setParty(null);
     m.players.forEach(addPlayer);
     setProfile(m.profile, true);
-    $('#overlay').hidden = true;
+    netReady = true; refreshOverlay();
     $('#roomCode').textContent = room.code;
     $('#goHome').hidden = room.mine;
     if (!new URLSearchParams(location.search).get('room') || m.notice) {
@@ -391,7 +400,8 @@ const modelsReady = Promise.all(SFILES.map((n) => new GLTFLoader().loadAsync(`/a
   });
   MODEL[n] = g.scene;
   SBB[n] = new THREE.Box3().setFromObject(g.scene);
-}))).then(() => { modelsLoaded = true; });
+  loadedN++; refreshOverlay();
+}))).then(() => { modelsLoaded = true; refreshOverlay(); });
 // 放一個模型。c = 換色(有布料換布料,否則換木頭)
 function sput(g, n, o = {}) {
   const m = MODEL[n].clone();
@@ -455,7 +465,8 @@ for (const type of Object.keys(RUGS)) BUILD[type] = (g, o) => buildRug(g, type, 
 for (const [type, k] of Object.entries(ITEMS)) BUILD[type] = (g, o = {}) => {
   const d = CATALOG[type], bb = SBB[k.m], wall = d.kind === 'wall';
   const z = wall ? 0 : k.back ? (bb.max.z - bb.min.z) / 2 + 0.03 : d.h / 2;
-  sput(g, k.m, { x: d.w / 2, z, c: o.c, ry: o.side === -1 ? Math.PI : 0 });
+  const model = sput(g, k.m, { x: d.w / 2, z, c: o.c, ry: o.side === -1 ? Math.PI : 0 });
+  if (type === 'cat') g.userData.anim = (t) => { model.scale.set(1 - Math.sin(t / 900) * 0.012, 1 + Math.sin(t / 900) * 0.035, 1); }; // 貓咪緩緩呼吸
   if (k.lamp) g.userData.lampAt = new THREE.Vector3(d.w / 2, k.lamp, wall ? 0.3 : z);
   if (k.glow) g.userData.glowAt = new THREE.Vector3(...k.glow);
   if (type === 'clock') { // 指針依現在時間轉動
@@ -513,8 +524,77 @@ function computeSeats() {
     }
     // 面向桌子(只取前後左右四個方向);附近沒有桌子就照擺放時的方向
     const face = best ? (Math.abs(bz) >= Math.abs(bx) ? (bz > 0 ? 0 : Math.PI) : (bx > 0 ? Math.PI / 2 : -Math.PI / 2)) : rotOf(i.r) * Math.PI / 2;
-    return { id: i.id, x, z, face, h: SEAT_TYPES[i.type], desk: best?.id };
+    return { id: i.id, x, z, face, h: SEAT_TYPES[i.type], desk: best?.id, fwd: best ? SIT_FWD : 0.08 };
   });
+  // 沙發可以坐兩個人(面向沙發的正面)
+  for (const i of room.items.filter((q) => q.type === 'ksofa')) {
+    const [W, H] = dimsOf(i.type, i.r), th = rotOf(i.r) * Math.PI / 2, cx = i.x + W / 2, cz = i.y + H / 2;
+    for (const k of [-0.42, 0.42]) seats.push({ id: i.id, x: cx + Math.cos(th) * k, z: cz - Math.sin(th) * k, face: th, h: 0.42, desk: null, fwd: 0.02, sofa: true });
+  }
+  seats.sort((a, b) => (a.desk != null ? 0 : 1) - (b.desk != null ? 0 : 1)); // 先坐滿書桌前的椅子,再坐其他座位
+}
+// ---------- 走路:繞過家具,不再直接穿過去 ----------
+let blocked = new Set(); // 被家具佔住的地板格
+const tkey = (x, y) => x + ',' + y;
+function computeBlocked() {
+  blocked = new Set();
+  for (const it of room.items) {
+    if (CATALOG[it.type]?.kind !== 'floor') continue;
+    const [w, h] = dimsOf(it.type, it.r);
+    for (let x = it.x; x < it.x + w; x++) for (let y = it.y; y < it.y + h; y++) blocked.add(tkey(x, y));
+  }
+  for (const p of players.values()) p.dest = null; // 房間變了,走到一半的人重新找路
+}
+// 從 (ax, ay) 直走到 (bx, by) 會不會撞到家具(allow = 起點與終點所在的格子,例外放行)
+function clearLine(ax, ay, bx, by, allow) {
+  const n = Math.ceil(Math.hypot(bx - ax, by - ay) / 0.12);
+  for (let i = 1; i < n; i++) {
+    const x = ax + ((bx - ax) * i) / n, y = ay + ((by - ay) * i) / n;
+    for (const [ox, oy] of [[0.2, 0], [-0.2, 0], [0, 0.2], [0, -0.2]]) { const k = tkey(Math.floor(x + ox), Math.floor(y + oy)); if (blocked.has(k) && !allow.has(k)) return false; }
+  }
+  return true;
+}
+function findPath(sx, sy, gx, gy) {
+  const tile = (v, n) => Math.min(n - 1, Math.max(0, Math.floor(v)));
+  const st = [tile(sx, COLS), tile(sy, ROWS)], gt = [tile(gx, COLS), tile(gy, ROWS)], allow = new Set([tkey(...st), tkey(...gt)]);
+  if (clearLine(sx, sy, gx, gy, allow)) return [[gx, gy]];
+  const open = (x, y) => x >= 0 && y >= 0 && x < COLS && y < ROWS && (!blocked.has(tkey(x, y)) || allow.has(tkey(x, y)));
+  const dist = new Map([[tkey(...st), 0]]), prev = new Map(), todo = [st];
+  while (todo.length) { // 房間很小,簡單的最短路徑搜尋就夠了
+    todo.sort((a, b) => dist.get(tkey(...a)) - dist.get(tkey(...b)));
+    const [x, y] = todo.shift(), d0 = dist.get(tkey(x, y));
+    if (x === gt[0] && y === gt[1]) break;
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+      const nx = x + dx, ny = y + dy;
+      // 斜走不能切過家具的角;但起點或終點本身被家具圍住時(例如塞在桌子後面的椅子)放寬,總比直接穿過桌子好
+      const squeeze = allow.has(tkey(x, y)) || allow.has(tkey(nx, ny));
+      if (!open(nx, ny) || (dx && dy && !squeeze && (!open(x + dx, y) || !open(x, y + dy)))) continue;
+      const nd = d0 + (dx && dy ? 1.414 : 1), k = tkey(nx, ny);
+      if (nd < (dist.get(k) ?? 1e9)) { dist.set(k, nd); prev.set(k, [x, y]); todo.push([nx, ny]); }
+    }
+  }
+  if (!prev.has(tkey(...gt))) return [[gx, gy]]; // 被家具圍住了:只好直走
+  const pts = [[gx, gy]];
+  for (let c = prev.get(tkey(...gt)); c && !(c[0] === st[0] && c[1] === st[1]); c = prev.get(tkey(...c))) pts.unshift([c[0] + 0.5, c[1] + 0.5]);
+  const out = []; // 能直走的就略過中間的轉折點,路線才不會一格一格地折
+  let cx = sx, cy = sy, i = 0;
+  while (i < pts.length) {
+    let j = pts.length - 1;
+    while (j > i && !clearLine(cx, cy, pts[j][0], pts[j][1], allow)) j--;
+    out.push(pts[j]); [cx, cy] = pts[j]; i = j + 1;
+  }
+  return out;
+}
+// 點到家具上時,改走到最近的空地
+function nearestFree(x, y) {
+  if (!blocked.has(tkey(Math.floor(x), Math.floor(y)))) return [x, y];
+  let best = [x, y], bd = 1e9;
+  for (let tx = 0; tx < COLS; tx++) for (let ty = 0; ty < ROWS; ty++) {
+    if (blocked.has(tkey(tx, ty))) continue;
+    const d = Math.hypot(tx + 0.5 - x, ty + 0.5 - y);
+    if (d < bd) { bd = d; best = [tx + 0.5, ty + 0.5]; }
+  }
+  return best;
 }
 function assignSeats() {
   if (!room) return;
@@ -645,6 +725,10 @@ function poseAvatar(g, dt, st) {
     if (st.pose === 2) { // 看書:雙手把書舉在胸前
       arms(1.2, 0.4, 1.55, 0.3, -0.2);
       P.neck = [0.22, 0, 0]; P.head = [0.18 + sin(t * 0.5) * 0.03, sin(t * 0.23) * 0.05, 0];
+    } else if (st.noDesk) { // 面前沒有桌子(坐沙發或自備小凳子):雙手放在腿上,偶爾看看四周
+      arms(1.22, 0.28, 0.95, 0.9);
+      P.spine = [0.02 + breathe, 0, 0]; P.chest = [0, 0, 0];
+      P.neck = [0.05, 0, 0]; P.head = [0.04 + sin(t * 0.4) * 0.03, sin(t * 0.21) * 0.25, 0];
     } else if (st.pose === 3) { // 寫字:左手壓著紙,右手小幅移動
       arms(1.15, 0.5, 1.38, 1.3);
       const k = sin(t * 7) * 0.05, k2 = sin(t * 1.3) * 0.1;
@@ -802,7 +886,7 @@ function rebuildRoom() {
   for (const w of wallPlanes) { w.material.map = w.material.emissiveMap = wallTex(room.wall, w.userData.width); w.material.needsUpdate = true; }
   floorMesh.material.map = floorMesh.material.emissiveMap = floorTex(room.floor); floorMesh.material.needsUpdate = true;
   itemsGroup.clear(); anims = [];
-  computeSeats(); assignSeats();
+  computeSeats(); assignSeats(); computeBlocked();
   let lamps = 0;
   lampLights = []; glowLights = []; neonLights = []; beamLights = [];
   for (const it of room.items) {
@@ -814,7 +898,7 @@ function rebuildRoom() {
     }
     if (it.c) opt = { ...opt, c: it.c };
     const inner = buildItem(it.type, opt);
-    const st = seats.find((q) => q.id === it.id);
+    const st = seats.find((q) => q.id === it.id && !q.sofa);
     if (st) { face = st.face; if (st.desk != null) inner.position.z += ITEMS[it.type].pull || CHAIR_FWD; } // 椅子自動轉向它面對的桌子,並往桌子拉近
     if (inner.userData.lampAt && lamps++ < 5) {
       // 衰減放緩,燈旁邊才不會整片過曝
@@ -1056,23 +1140,29 @@ function frame(t) {
     if (!p.obj) continue;
     // 專注時走向分配到的椅子;沒有空椅子就在原地坐自己的小凳子
     const gx = p.seat ? p.seat.x : p.tx, gy = p.seat ? p.seat.z : p.ty;
-    const dx = gx - p.x, dy = gy - p.y, d = Math.hypot(dx, dy);
-    const walking = d > 0.02;
-    if (walking) {
-      const s = Math.min(d, 2.1 * dt);
-      p.x += (dx / d) * s; p.y += (dy / d) * s;
+    if (!p.dest || p.dest[0] !== gx || p.dest[1] !== gy) { // 目的地變了:找一條繞過家具的路
+      p.dest = [gx, gy];
+      p.path = Math.hypot(gx - p.x, gy - p.y) > 0.02 ? findPath(p.x, p.y, gx, gy) : [];
+    }
+    let walking = false, dx = 0, dy = 0;
+    if (p.path.length) {
+      const [wx, wy] = p.path[0], step = 2.1 * dt;
+      dx = wx - p.x; dy = wy - p.y;
+      const d = Math.hypot(dx, dy);
+      if (d <= step) { p.x = wx; p.y = wy; p.path.shift(); } else { p.x += (dx / d) * step; p.y += (dy / d) * step; }
+      walking = true;
     }
     const f = p.focus && (p.focus.mode === 'up' || p.focus.endAt > t) ? p.focus : null;
     const sitting = !!f && f.phase === 'focus' && p.pose !== 1 && !walking;
-    const want = walking ? Math.atan2(dx, dy) : sitting && p.seat ? p.seat.face : p.id === me && activeView === 'desk' ? camGoal.yaw : 0.35; // 桌前視角下,站著時轉向鏡頭
+    const want = walking ? (Math.hypot(dx, dy) > 1e-4 ? Math.atan2(dx, dy) : p.obj.rotation.y) : sitting && p.seat ? p.seat.face : p.id === me && activeView === 'desk' ? camGoal.yaw : 0.35; // 桌前視角下,站著時轉向鏡頭
     let diff = want - p.obj.rotation.y;
     diff = Math.atan2(Math.sin(diff), Math.cos(diff));
     p.obj.rotation.y += diff * Math.min(1, dt * 12);
     p.heading = p.obj.rotation.y;
-    const fwd = sitting && p.seat ? SIT_FWD : 0;
+    const fwd = sitting && p.seat ? p.seat.fwd : 0;
     p.sit = (p.sit || 0) + (fwd - (p.sit || 0)) * Math.min(1, dt * 8);
     p.obj.position.set(p.x + Math.sin(p.obj.rotation.y) * p.sit, 0, p.y + Math.cos(p.obj.rotation.y) * p.sit);
-    poseAvatar(p.obj, dt, { walking, sitting, pose: p.pose, cheering: p.cheerUntil > t, seatH: p.seat?.h, ownStool: !p.seat, t });
+    poseAvatar(p.obj, dt, { walking, sitting, pose: p.pose, noDesk: !p.seat || p.seat.desk == null, cheering: p.cheerUntil > t, seatH: p.seat?.h, ownStool: !p.seat, t });
     p.labelY = (p.labelY || AVATAR_H) + ((sitting ? 1.42 : AVATAR_H) - (p.labelY || AVATAR_H)) * Math.min(1, dt * 6);
     // 標籤
     tmpV.set(p.x, p.labelY + 0.14, p.y).project(camera);
@@ -1167,8 +1257,7 @@ canvas.addEventListener('pointerup', (ev) => {
   }
   const p = players.get(me);
   if (!p || !pt || pt.wall) return;
-  p.tx = Math.min(COLS - 0.3, Math.max(0.3, pt.x));
-  p.ty = Math.min(ROWS - 0.15, Math.max(0.2, pt.z));
+  [p.tx, p.ty] = nearestFree(Math.min(COLS - 0.3, Math.max(0.3, pt.x)), Math.min(ROWS - 0.25, Math.max(0.25, pt.z)));
   send({ t: 'move', x: p.tx, y: p.ty });
 });
 window.addEventListener('keydown', (ev) => {
