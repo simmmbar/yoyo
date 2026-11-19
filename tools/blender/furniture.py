@@ -840,6 +840,53 @@ def cat_walk():
     return m
 
 
+# ---------------- 角色配件(掛在頭部骨架上;原點 = 頭部骨架的位置,臉朝 -Y) ----------------
+# 耳機和眼鏡以臉的位置為準;貓耳和帽子的原點在「頭頂」,遊戲端會依每個角色的頭髮高度往上移。
+
+def acc_headphones():
+    m = Model('acc_headphones')
+    R, zc, y0 = 0.108, 0.075, 0.012
+    n = 13
+    for i in range(n):                                                    # 頭帶:沿著圓弧排一圈小方塊
+        a = math.pi * (0.06 + 0.88 * i / (n - 1))
+        m.box((0.032, 0.03, 0.012), (R * math.cos(a), y0, zc + R * math.sin(a)), 'dark', bevel=0.005, rot=(0, math.pi / 2 - a, 0), outline=(i % 2 == 0))
+    for sx in (-1, 1):
+        m.box((0.012, 0.02, 0.05), (sx * R, y0, zc + 0.03), 'metal', bevel=0.004, outline=False)                 # 伸縮桿
+        m.cyl(0.05, 0.05, 0.03, (sx * (R - 0.004), y0, zc - 0.005), 'fabric', segs=20, rot=Y90, bevel=0.01)    # 耳罩外殼
+        m.cyl(0.042, 0.046, 0.016, (sx * (R - 0.022), y0, zc - 0.005), 'cream', segs=20, rot=Y90, bevel=0.006, outline=False)  # 耳墊
+        m.cyl(0.02, 0.02, 0.004, (sx * (R + 0.012), y0, zc - 0.005), 'white', segs=14, rot=Y90, outline=False)
+    return m
+
+
+def acc_glasses():
+    m = Model('acc_glasses')
+    yf, z, ex, r = -0.098, 0.062, 0.034, 0.027
+    for sx in (-1, 1):
+        for i in range(14):                                               # 圓框
+            a = i * 2 * math.pi / 14
+            m.box((0.014, 0.006, 0.006), (sx * ex + math.cos(a) * r, yf, z + math.sin(a) * r), 'dark', bevel=0.002, seg=1,
+                  rot=(0, -(a + math.pi / 2), 0), outline=False)
+        m.box((0.006, 0.105, 0.006), (sx * (ex + r + 0.012), yf + 0.05, z + 0.006), 'dark', bevel=0.002, seg=1, rot=(0, 0, sx * 0.13), outline=False)  # 鏡腳
+    m.box((0.02, 0.006, 0.006), (0, yf, z + 0.008), 'dark', bevel=0.002, seg=1, outline=False)          # 鼻樑
+    return m
+
+
+def acc_catears():
+    m = Model('acc_catears')
+    for sx in (-1, 1):
+        m.cyl(0.036, 0.004, 0.085, (sx * 0.062, 0.0, 0.012), 'fabric', segs=12, rot=(0, sx * 0.3, 0))
+        m.cyl(0.02, 0.002, 0.05, (sx * 0.06, -0.014, 0.008), 'pink', segs=10, rot=(0, sx * 0.3, 0), outline=False)
+    return m
+
+
+def acc_beret():
+    m = Model('acc_beret')
+    m.ball(0.118, (0.012, 0.01, -0.012), 'fabric', scale=(1.12, 1.12, 0.36), rot=(0.1, -0.16, 0))
+    m.cyl(0.085, 0.09, 0.016, (0.0, 0.0, -0.04), 'fabric', segs=24, rot=(0.06, -0.08, 0), outline=False)   # 帽圍
+    m.cyl(0.006, 0.006, 0.022, (0.02, 0.012, 0.034), 'fabric', segs=8, rot=(0.1, -0.16, 0), outline=False)  # 頂上的小蒂
+    return m
+
+
 # ---------------- 桌上小物 ----------------
 
 def laptop():
@@ -931,6 +978,7 @@ ALL = {
     'sofa': lambda: sofa('sofa', 1.85), 'armchair': lambda: sofa('armchair', 0.92, pillows=False), 'ottoman': ottoman,
     'tv': tv, 'fridge': fridge, 'speaker': speaker, 'arcade': arcade, 'vending': vending,
     'floorlamp': floorlamp, 'plant_big': plant_big, 'plant': plant, 'bin': bin_, 'cat': cat, 'cat_walk': cat_walk,
+    'acc_headphones': acc_headphones, 'acc_glasses': acc_glasses, 'acc_catears': acc_catears, 'acc_beret': acc_beret,
     'laptop': laptop, 'books': books, 'plant_small': plant_small, 'succulent': succulent, 'radio': radio, 'teaset': teaset,
 }
 

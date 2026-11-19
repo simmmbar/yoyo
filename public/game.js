@@ -353,7 +353,10 @@ const ITEMS = {
   radio: { m: 'radio' }, brew: { m: 'teaset' },
   window: { m: 'window' }, painting: { m: 'frame' }, poster: { m: 'poster' }, clock: { m: 'clock' }, shelf: { m: 'wallshelf' }, wlamp: { m: 'walllamp', lamp: 1.95 }, mirror: { m: 'mirror' },
 };
-const SFILES = [...new Set(Object.values(ITEMS).map((k) => k.m)), 'door', 'cat_walk'];
+// 角色配件:掛在頭部骨架上。top = 以頭頂(含頭髮)為基準往上放
+// fit = 模型原本的頭帶高度:依角色的頭髮高度等比例放大,耳機才會套在頭髮外面
+const ACCS = [null, { m: 'acc_headphones', name: '耳機', fit: 0.183 }, { m: 'acc_glasses', name: '眼鏡' }, { m: 'acc_catears', name: '貓耳', top: -0.07, scale: 1.4 }, { m: 'acc_beret', name: '貝雷帽', top: -0.032, scale: 1.08 }];
+const SFILES = [...new Set(Object.values(ITEMS).map((k) => k.m)), 'door', 'cat_walk', ...ACCS.filter(Boolean).map((k) => k.m)];
 const MODEL = {}, SBB = {}, STINT = {}; // 模型、外框、可否換色
 let modelsLoaded = false;
 // 換色:有布料的家具換布料顏色,其餘換木頭顏色(0 = 原色)
@@ -801,9 +804,21 @@ function buildAvatar(a, onReady) {
     g.add(vrm.scene);
     const H = vrm.humanoid, bone = {};
     for (const n of BONES) bone[n] = H.getNormalizedBoneNode(n);
+    // 配件:量出頭頂(含頭髮)比頭部骨架高多少,帽子和貓耳才不會埋在頭髮裡
+    vrm.scene.updateMatrixWorld(true);
+    const headY = bone.head.getWorldPosition(new THREE.Vector3()).y, acc = ACCS[a.acc];
+    if (acc) {
+      const top = (new THREE.Box3().setFromObject(vrm.scene).max.y - headY) / AV_SCALE;
+      const wear = () => {
+        if (g.userData.dead) return;
+        const m = sput(bone.head, acc.m, { y: acc.top != null ? top + acc.top : 0, ry: Math.PI });
+        m.scale.setScalar(acc.fit ? Math.max(1, (top + 0.015) / acc.fit) : acc.scale || 1);
+      };
+      if (modelsLoaded) wear(); else modelsReady.then(wear);
+    }
     const gaze = new THREE.Object3D(); scene.add(gaze);
     if (vrm.lookAt) vrm.lookAt.target = gaze;
-    g.userData = { ...g.userData, ready: true, vrm, bone, gaze, hipsY: bone.hips.position.y, flip: vrm.meta?.metaVersion === '0' ? -1 : 1, blinkAt: 2, blink: 0, ph: Math.random() * 6, seat: null, book: null };
+    g.userData = { ...g.userData, ready: true, vrm, bone, gaze, headY, hipsY: bone.hips.position.y, flip: vrm.meta?.metaVersion === '0' ? -1 : 1, blinkAt: 2, blink: 0, ph: Math.random() * 6, seat: null, book: null };
     poseAvatar(g, 0, {});
     onReady?.(g);
   }).catch((e) => console.error('avatar load failed', e));
@@ -1197,7 +1212,7 @@ new ResizeObserver(fitCamera).observe(stage);
 
 // 縮圖(家具卡片、角色預覽)
 const thumb = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-thumb.setSize(256, 256, false);
+thumb.setSize(512, 512, false);
 thumb.localClippingEnabled = true;
 thumb.toneMapping = THREE.ACESFilmicToneMapping; thumb.toneMappingExposure = 1.12;
 const thumbScene = new THREE.Scene(), thumbCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 100);
@@ -1222,8 +1237,10 @@ function renderAvatarPreview() {
     if (seq === previewSeq) {
       const cv = $('#avatarPreview'), c2 = cv.getContext('2d');
       thumbScene.add(g);
-      thumbCam.position.set(0, 0.95, 0).addScaledVector(FRONT_DIR, 20); thumbCam.lookAt(0, 0.95, 0);
-      Object.assign(thumbCam, { left: -1, right: 1, top: 1, bottom: -1 }); thumbCam.updateProjectionMatrix();
+      // 半身:臉和配件看得清楚,上衣顏色也看得到
+      const cy = g.userData.headY - 0.24; // 以頭的高度為準,高矮不同的角色都框得到臉
+      thumbCam.position.set(0, cy, 0).addScaledVector(FRONT_DIR, 20); thumbCam.lookAt(0, cy, 0);
+      Object.assign(thumbCam, { left: -0.55, right: 0.55, top: 0.55, bottom: -0.55 }); thumbCam.updateProjectionMatrix();
       thumb.render(thumbScene, thumbCam); thumbScene.remove(g);
       c2.clearRect(0, 0, cv.width, cv.height); c2.drawImage(thumb.domElement, 0, 0, cv.width, cv.height);
     }
@@ -1883,6 +1900,7 @@ function buildAvatarOptions() {
     ['造型', 'hair', LOOK_NAMES.map((n) => ({ text: n }))],
     ['髮色', 'hairColor', HAIRC.map((c) => (c ? { color: c } : { text: '原色' }))],
     ['上衣', 'shirt', SHIRT.map((c) => (c ? { color: c } : { text: '原色' }))],
+    ['配件', 'acc', ACCS.map((k) => ({ text: k ? k.name : '無' }))],
   ];
   $('#avatarOptions').replaceChildren(...rows.flatMap(([title, key, opts]) => [
     el('h3', { textContent: title }),
