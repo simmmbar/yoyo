@@ -47,6 +47,10 @@ function newToken() {
 let token = store.get('yoyo_token');
 if (!token) { token = newToken(); store.set('yoyo_token', token); }
 
+// 切到別的分頁工作時,用系統通知提醒時間到了(第一次開始專注時會詢問是否允許)
+function notify(text) {
+  try { if (document.hidden && 'Notification' in window && Notification.permission === 'granted') new Notification('悠悠自習室', { body: text, tag: 'yoyo-focus' }); } catch {}
+}
 function toast(text) {
   const t = el('div', { className: 'toast', textContent: text });
   $('#toasts').append(t);
@@ -153,11 +157,12 @@ const on = {
     if (m.done.some((d) => d.id === me)) takeGroupPhoto(m); else toast(`${m.done.length} 人完成了共同專注 ${m.minutes} 分鐘`);
   },
   focus_done(m) {
-    if (m.stopped) { if (m.minutes) toast(`已記錄 ${m.minutes} 分鐘專注`); }
-    else if (m.party) toast(`共同專注 ${m.minutes} 分鐘完成!`);
-    else if (m.phase === 'break') toast(m.next ? '休息結束,開始下一輪專注' : '休息結束');
-    else toast(m.next === 'break' ? `專注 ${m.minutes} 分鐘完成!休息 ${m.breakMin} 分鐘` : `專注 ${m.minutes} 分鐘完成!`);
-    if (!m.stopped) chime();
+    const msg = m.stopped ? (m.minutes ? `已記錄 ${m.minutes} 分鐘專注` : '')
+      : m.party ? `共同專注 ${m.minutes} 分鐘完成!`
+      : m.phase === 'break' ? (m.next ? '休息結束,開始下一輪專注' : '休息結束')
+      : m.next === 'break' ? `專注 ${m.minutes} 分鐘完成!休息 ${m.breakMin} 分鐘` : `專注 ${m.minutes} 分鐘完成!`;
+    if (msg) toast(msg);
+    if (!m.stopped) { chime(); notify(msg); }
     refreshTimer();
   },
   toast(m) { toast(m.text); },
@@ -186,7 +191,7 @@ const stage = $('#stage'), canvas = $('#game'), labels = $('#labels');
 let renderer;
 try { renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true }); }
 catch (e) { throw new Error('WebGL unavailable: ' + e.message); }
-renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1)); // 實際的解析度由畫質等級決定(見 applyQuality)
 renderer.shadowMap.enabled = true;
 renderer.localClippingEnabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -330,7 +335,8 @@ const screenTex = () => canvasTex('pcscreen', 256, 144, (c, w, h) => {
   c.fillStyle = '#c9cfe8'; for (let i = 0; i < 6; i++) c.fillRect(28, 38 + i * 11, 60 + ((i * 37) % 50), 5);
   c.fillStyle = 'rgba(255,255,255,.85)'; c.fillRect(162, 30, 78, 60); c.fillStyle = '#ffc98a'; c.beginPath(); c.arc(201, 60, 18, 0, 7); c.fill();
 });
-const skyTex = (mode) => canvasTex('sky' + mode, 384, 256, (c, w, h) => {
+let raining = false; // 開著雨聲時,窗外也下雨
+const skyTex = (mode) => canvasTex('sky' + mode + (raining ? 'rain' : ''), 384, 256, (c, w, h) => {
   const gr = c.createLinearGradient(0, 0, 0, h);
   const cols = { night: ['#1b2452', '#4a5596'], dusk: ['#6a7cc8', '#ffbe95'], day: ['#8fd0f5', '#e3f5fd'] }[mode];
   gr.addColorStop(0, cols[0]); gr.addColorStop(1, cols[1]); c.fillStyle = gr; c.fillRect(0, 0, w, h);
@@ -349,6 +355,11 @@ const skyTex = (mode) => canvasTex('sky' + mode, 384, 256, (c, w, h) => {
   c.fillStyle = land[1]; c.beginPath(); c.moveTo(0, h); c.lineTo(0, h * 0.84);
   for (let i = 0; i <= 10; i++) c.quadraticCurveTo((i + 0.5) * w / 10 - w / 20, h * (0.76 + (i % 3) * 0.02), (i + 1) * w / 10, h * 0.86);
   c.lineTo(w, h); c.fill();
+  if (raining) { // 陰天:整片罩上一層灰藍,再加幾朵壓得低低的烏雲
+    c.fillStyle = mode === 'night' ? 'rgba(24,28,52,.6)' : mode === 'dusk' ? 'rgba(92,90,120,.6)' : 'rgba(128,142,164,.62)'; c.fillRect(0, 0, w, h);
+    c.fillStyle = mode === 'night' ? 'rgba(52,58,92,.8)' : 'rgba(150,160,180,.85)';
+    for (const [x, y, r] of [[40, 18, 46], [110, 8, 54], [190, 22, 50], [270, 6, 58], [350, 20, 48]]) { c.beginPath(); c.arc(x, y, r, 0, 7); c.fill(); }
+  }
 });
 const posterTex = () => canvasTex('poster', 256, 352, (c, w, h) => {
   const gr = c.createLinearGradient(0, 0, 0, h); gr.addColorStop(0, '#2b2f66'); gr.addColorStop(0.55, '#c45c8a'); gr.addColorStop(1, '#ffb27a'); c.fillStyle = gr; c.fillRect(0, 0, w, h);
@@ -366,6 +377,18 @@ const artTex = () => canvasTex('art', 256, 344, (c, w, h) => { // 掛畫:海邊�
   c.fillStyle = '#fff8ee'; c.fillRect(40, h * 0.6, 62, 46); c.fillStyle = '#e58a7c'; c.beginPath(); c.moveTo(32, h * 0.6); c.lineTo(71, h * 0.5); c.lineTo(110, h * 0.6); c.fill();
   c.fillStyle = '#6fa3b8'; c.fillRect(62, h * 0.66, 18, 26);
 });
+const rainTex = () => { // 雨絲:透明底上的斜線,往下捲動
+  const t = canvasTex('rainStreaks', 128, 256, (c, w, h) => {
+    c.clearRect(0, 0, w, h); c.strokeStyle = '#eaf2ff'; c.lineCap = 'round';
+    for (let i = 0; i < 46; i++) {
+      const x = rnd01(i + 400) * w, y = rnd01(i + 430) * h, len = 14 + rnd01(i + 460) * 26;
+      c.globalAlpha = 0.25 + rnd01(i + 490) * 0.45; c.lineWidth = 1 + rnd01(i + 520) * 1.2;
+      for (const dy of [-h, 0, h]) { c.beginPath(); c.moveTo(x, y + dy); c.lineTo(x - len * 0.16, y + dy + len); c.stroke(); }
+    }
+  });
+  t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(3, 1.1);
+  return t;
+};
 const TEX = { screen: screenTex, poster: posterTex, art: artTex, sky: () => skyTex(mood) };
 
 // 木紋與布紋:可以無限重複的淡色花紋,會和家具本身的顏色相乘,所以換色之後紋路還在
@@ -505,6 +528,11 @@ for (const [type, k] of Object.entries(ITEMS)) BUILD[type] = (g, o = {}) => {
   if (type === 'cat') g.userData.anim = (t) => { model.scale.set(1 - Math.sin(t / 900) * 0.012, 1 + Math.sin(t / 900) * 0.035, 1); }; // 貓咪緩緩呼吸
   if (k.lamp) g.userData.lampAt = new THREE.Vector3(d.w / 2, k.lamp, wall ? 0.3 : z);
   if (k.glow) g.userData.glowAt = new THREE.Vector3(...k.glow);
+  if (type === 'window' && raining) { // 玻璃後面往下流的雨絲
+    const tex = rainTex(), m = new THREE.Mesh(geo('rainPlane', () => new THREE.PlaneGeometry(1.64, 1.19)), geo('rainMat', () => new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, toneMapped: false })));
+    m.position.set(d.w / 2, 1.625, 0.02); g.add(m);
+    g.userData.anim = (t) => { tex.offset.y = (t / 520) % 1; tex.offset.x = (t / 5200) % 1; };
+  }
   if (type === 'clock') { // 指針依現在時間轉動
     const hand = (w, len, col) => {
       const h = new THREE.Mesh(geo(`hand${w},${len}`, () => new THREE.BoxGeometry(w, len, 0.004).translate(0, len / 2 - 0.012, 0)), toonMat('hand', col));
@@ -979,10 +1007,35 @@ function syncGhost() {
 
 
 // ---------- 柔光後製(可在設定關閉,比較省電) ----------
+// ---------- 畫質:自動模式會量每秒幾格,太卡就一級一級往下降 ----------
+// 0 全開 → 1 解析度降一點 → 2 再降並關掉柔光 → 3 連陰影也關掉
+let qPref = ['auto', 'high', 'low'].includes(store.get('yoyo_quality')) ? store.get('yoyo_quality') : 'auto';
+let qLevel = qPref === 'low' ? 2 : 0, fpsN = 0, fpsT0 = 0, slowRuns = 0, qTold = false;
+function applyQuality() {
+  const dpr = window.devicePixelRatio || 1;
+  renderer.setPixelRatio(Math.min([2, 1.5, 1, 1][qLevel], dpr));
+  LIGHTS.sun.castShadow = qLevel < 3;
+  if (composer) { composer.dispose?.(); composer = null; }
+  fitCamera();
+}
+function measureFps(t) {
+  if (qPref !== 'auto' || qLevel >= 3 || document.hidden || !modelsLoaded) { fpsT0 = 0; return; }
+  if (!fpsT0) { fpsT0 = t + 4000; fpsN = 0; return; } // 剛載入或剛調整完,先等幾秒再量
+  if (t < fpsT0) return;
+  fpsN++;
+  if (t - fpsT0 < 3000) return;
+  const fps = (fpsN * 1000) / (t - fpsT0);
+  fpsT0 = t; fpsN = 0;
+  slowRuns = fps < 26 ? slowRuns + 1 : 0;
+  if (slowRuns < 2) return; // 連續兩次都慢才降,避免偶爾卡一下就降畫質
+  slowRuns = 0; qLevel++; fpsT0 = 0;
+  applyQuality();
+  if (!qTold) { qTold = true; toast('畫面有點卡,已自動調低畫質(可在設定調整)'); }
+}
 let fxOn = store.get('yoyo_fx') !== '0', composer = null, bloom = null;
 function setupFx() {
   if (composer) { composer.dispose?.(); composer = null; }
-  if (!fxOn) return;
+  if (!fxOn || qLevel >= 2) return;
   const pr = renderer.getPixelRatio(), w = stage.clientWidth || 1, h = stage.clientHeight || 1;
   composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(w * pr, h * pr, { type: THREE.HalfFloatType, samples: 4 }));
   composer.addPass(new RenderPass(scene, camera));
@@ -1224,6 +1277,7 @@ function frame(t) {
   if (composer) composer.render(); else renderer.render(scene, camera);
   if (photoJob && t >= photoJob.at) { const j = photoJob; photoJob = null; composePhoto(j); }
   tickTimer(t);
+  measureFps(t);
 }
 
 // ---------- 畫布操作 ----------
@@ -1341,6 +1395,8 @@ $('#drawerClose').addEventListener('click', () => openTab(null));
 const num = (id, lo, hi, def) => { const v = Math.floor(+$(id).value); return v >= lo && v <= hi ? v : def; };
 const idleMs = () => (timerMode === 'up' ? 0 : (timerMode === 'pomo' ? num('#pomoFocus', 1, 180, 25) : selectedMin) * 60000);
 let lastSec = -1;
+// 分頁在背景時畫面不會更新,另外每秒跑一次,分頁標題上的時間才會繼續走
+setInterval(() => { if (document.hidden) tickTimer(performance.now()); }, 1000);
 function tickTimer(t) {
   let f = myFocus();
   if (f && f.mode !== 'up' && f.endAt <= t - 1500) f = null; // 等伺服器送下一階段
@@ -1392,6 +1448,7 @@ $('#customMin').addEventListener('input', (ev) => {
 });
 $('#focusBtn').addEventListener('click', () => {
   if (myFocus()) return send({ t: 'focus_stop' });
+  try { if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission(); } catch {}
   send({ t: 'focus_start', mode: timerMode, minutes: timerMode === 'pomo' ? num('#pomoFocus', 1, 180, 25) : selectedMin, breakMin: num('#pomoBreak', 1, 60, 5) });
 });
 // 狀態文字與專注姿勢
@@ -1764,6 +1821,15 @@ $('#moods').addEventListener('click', (ev) => {
   if (applyMood()) rebuildRoom();
 });
 refreshMoodUI();
+function refreshQualityUI() { document.querySelectorAll('#quality button').forEach((x) => x.classList.toggle('on', x.dataset.q === qPref)); }
+$('#quality').addEventListener('click', (ev) => {
+  const b = ev.target.closest('button');
+  if (!b) return;
+  qPref = b.dataset.q; store.set('yoyo_quality', qPref);
+  qLevel = qPref === 'low' ? 2 : 0; fpsT0 = 0; slowRuns = 0;
+  refreshQualityUI(); applyQuality();
+});
+refreshQualityUI();
 $('#fxToggle').checked = fxOn;
 $('#fxToggle').addEventListener('change', (ev) => { fxOn = ev.target.checked; store.set('yoyo_fx', fxOn ? '1' : '0'); setupFx(); });
 
@@ -1825,11 +1891,12 @@ $('#sounds').replaceChildren(...Object.entries(SOUNDS).map(([key, s]) => {
   const vol = el('input', { type: 'range', min: 0, max: 100, value: 50, ariaLabel: s.name + ' 音量' });
   let stop = null, gain = null;
   btn.onclick = () => {
-    if (stop) { stop(); gain.disconnect(); stop = null; btn.classList.remove('on'); return; }
+    if (stop) { stop(); gain.disconnect(); stop = null; btn.classList.remove('on'); if (key === 'rain') setRain(false); return; }
     ac = ac || new AudioContext();
     ac.resume();
     gain = ac.createGain(); gain.gain.value = vol.value / 100; gain.connect(ac.destination);
     stop = s.make(gain);
+    if (key === 'rain') setRain(true);
     btn.classList.add('on');
   };
   vol.oninput = () => { if (gain) gain.gain.value = vol.value / 100; };
@@ -1892,6 +1959,7 @@ if ('mediaSession' in navigator) {
 }
 refreshPlayer();
 
+function setRain(v) { raining = v; if (room && modelsLoaded) rebuildRoom(); }
 function chime() {
   try {
     ac = ac || new AudioContext(); ac.resume();
@@ -1903,6 +1971,7 @@ function chime() {
   } catch {}
 }
 
+applyQuality();
 window.__booted = true;
 connect();
 tickClock();
