@@ -346,6 +346,7 @@ const handlers = {
     c.fresh = !profiles[c.key]; // 這個存檔碼伺服器沒看過(新玩家,或伺服器的資料被清掉了)
     const p = (c.profile = getProfile(c.key));
     if (Number.isInteger(m.tz) && Math.abs(m.tz) <= 840) p.tz = m.tz;
+    p.seen = Date.now();
     byKey.set(c.key, c);
 
     let notice = null;
@@ -596,6 +597,25 @@ setInterval(() => {
   }
   tickParties();
 }, 1000);
+
+// 清理:半年沒回來的存檔連同房間一起刪掉,資料才不會無限長大。
+// (玩家的瀏覽器裡還有備份,回來時會自動還原。)
+const STALE_MS = 180 * 86400000;
+function prune() {
+  const now = Date.now();
+  let n = 0;
+  for (const [key, p] of Object.entries(profiles)) {
+    if (!p.seen) { p.seen = now; markDirty(); continue; } // 舊存檔沒有這個欄位:從現在開始算
+    if (now - p.seen < STALE_MS || byKey.has(key)) continue;
+    const r = rooms[p.room];
+    if (r && r.ownerKey === key && !live.get(r.code)?.size) delete rooms[r.code];
+    delete profiles[key]; n++;
+  }
+  for (const [code, r] of Object.entries(rooms)) if (!profiles[r.ownerKey] && !live.get(code)?.size) { delete rooms[code]; n++; } // 沒有主人的房間
+  if (n) { markDirty(); console.log(`pruned ${n} stale saves/rooms`); }
+}
+prune();
+setInterval(prune, 12 * 3600000);
 
 // ---------- HTTP ----------
 const STATIC = {

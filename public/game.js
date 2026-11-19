@@ -1034,15 +1034,15 @@ function rebuildRoom() {
     const inner = buildItem(it.type, opt);
     const st = seats.find((q) => q.id === it.id && !q.sofa);
     if (st) { face = st.face; if (st.desk != null) inner.position.z += ITEMS[it.type].pull || CHAIR_FWD; } // 椅子自動轉向它面對的桌子,並往桌子拉近
-    if (inner.userData.lampAt && lamps++ < 5) {
+    if (inner.userData.lampAt && lamps++ < [5, 5, 3, 2][qLevel]) { // 畫質越低,會發光的燈越少(燈是最吃效能的東西)
       // 衰減放緩,燈旁邊才不會整片過曝
       const l = new THREE.PointLight(0xffb866, MOODS[mood].lamp, 4.2, 1.0);
       l.position.copy(inner.userData.lampAt); inner.add(l);
       l.userData.k = CATALOG[it.type].kind === 'top' ? 0.5 : 1; // 檯燈離桌面和人很近,亮度減半
       lampLights.push(l);
     }
-    if (inner.userData.neonAt && neonLights.length < 2) { const l = new THREE.PointLight(0xff6fa8, MOODS[mood].neon, 4, 1.4); l.position.copy(inner.userData.neonAt); inner.add(l); neonLights.push(l); }
-    if (inner.userData.glowAt && glowLights.length < 3) { // 螢幕的藍光(最多三個)
+    if (inner.userData.neonAt && neonLights.length < [2, 2, 1, 0][qLevel]) { const l = new THREE.PointLight(0xff6fa8, MOODS[mood].neon, 4, 1.4); l.position.copy(inner.userData.neonAt); inner.add(l); neonLights.push(l); }
+    if (inner.userData.glowAt && glowLights.length < [3, 3, 1, 0][qLevel]) { // 螢幕的藍光
       const l = new THREE.PointLight(0x8fc0ff, MOODS[mood].glow, 3.2, 1.2); l.position.copy(inner.userData.glowAt); inner.add(l);
       glowLights.push(l);
     }
@@ -1084,11 +1084,13 @@ function syncGhost() {
 let qPref = ['auto', 'high', 'low'].includes(store.get('yoyo_quality')) ? store.get('yoyo_quality') : 'auto';
 let qLevel = qPref === 'low' ? 2 : 0, fpsN = 0, fpsT0 = 0, slowRuns = 0, qTold = false;
 function applyQuality() {
-  const dpr = window.devicePixelRatio || 1;
+  const dpr = window.devicePixelRatio || 1, sh = LIGHTS.sun.shadow, size = qLevel === 0 ? 2048 : 1024;
   renderer.setPixelRatio(Math.min([2, 1.5, 1, 1][qLevel], dpr));
   LIGHTS.sun.castShadow = qLevel < 3;
+  if (sh.mapSize.x !== size) { sh.mapSize.set(size, size); sh.map?.dispose(); sh.map = null; }
   if (composer) { composer.dispose?.(); composer = null; }
   fitCamera();
+  if (room && modelsLoaded) rebuildRoom(); // 燈的數量跟著畫質調整
 }
 function measureFps(t) {
   if (qPref !== 'auto' || qLevel >= 3 || document.hidden || !modelsLoaded) { fpsT0 = 0; return; }
@@ -1098,7 +1100,7 @@ function measureFps(t) {
   if (t - fpsT0 < 3000) return;
   const fps = (fpsN * 1000) / (t - fpsT0);
   fpsT0 = t; fpsN = 0;
-  slowRuns = fps < 26 ? slowRuns + 1 : 0;
+  slowRuns = fps < 22 ? slowRuns + 1 : 0;
   if (slowRuns < 2) return; // 連續兩次都慢才降,避免偶爾卡一下就降畫質
   slowRuns = 0; qLevel++; fpsT0 = 0;
   applyQuality();
@@ -1290,8 +1292,13 @@ function canPlace(type, x, y, r, ignoreId) {
 // ---------- 主迴圈 ----------
 let lastT = performance.now();
 const tmpV = new THREE.Vector3();
+// 省電:沒有在操作時每秒只畫約 30 格(專注時畫面會開好幾個小時);拖曳、點擊、打字的時候恢復全速
+let activeUntil = 0;
+const poke = () => { activeUntil = performance.now() + 2500; };
+for (const ev of ['pointerdown', 'pointermove', 'wheel', 'keydown', 'touchstart']) window.addEventListener(ev, poke, { passive: true });
 function frame(t) {
   requestAnimationFrame(frame);
+  if (t >= activeUntil && t - lastT < 31) return;
   const dt = Math.min(0.1, (t - lastT) / 1000); lastT = t;
   if (!room || !floorMesh) return;
   for (const a of anims) a(t);
@@ -1423,7 +1430,9 @@ canvas.addEventListener('pointerup', (ev) => {
   send({ t: 'move', x: p.tx, y: p.ty });
 });
 window.addEventListener('keydown', (ev) => {
-  if (ev.key === 'Escape') setHolding(null);
+  if (ev.key === 'Escape') { // 依序關掉:手上的家具 → 照片 → 面板
+    if (holding) setHolding(null); else if (!$('#photo').hidden) $('#photo').hidden = true; else if (currentTab) openTab(null);
+  }
   const typing = /INPUT|TEXTAREA/.test(document.activeElement?.tagName || '');
   if ((ev.key === 'r' || ev.key === 'R') && holding && !typing) rotateHolding();
   if ((ev.key === 'c' || ev.key === 'C') && holding && !typing) tintHolding();
