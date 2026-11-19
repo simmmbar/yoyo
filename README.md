@@ -59,6 +59,6 @@ public/game.js     3D 場景(three.js)、連線、計時、佈置、聊天、環
 ## 素材授權
 
 - 角色模型:VRoid Studio 範例角色(pixiv 發布,CC0),共 6 個。檔案在 `public/assets/avatars/`,貼圖經過縮小;動作是程式即時擺出來的,沒有使用動作檔。顯示用 `@pixiv/three-vrm`(MIT)。
-- 家具、門窗、掛飾、貓咪:全部是本專案自己用 Blender 的 Python 介面做的原創模型,共 45 個。原始程式在 `tools/blender/furniture.py`(`pip install bpy` 後執行即可重新產生),輸出在 `public/assets/studio/`。遊戲裡用卡通打光加描邊顯示,和動漫角色同一種畫法;地毯、窗景、掛畫、螢幕畫面是遊戲端畫的。
+- 家具、門窗、掛飾、貓咪:全部是本專案自己用 Blender 的 Python 介面做的原創模型,共 45 個。原始程式在 `tools/blender/furniture.py`(`pip install bpy` 後執行即可重新產生),輸出在 `public/assets/studio/`。遊戲裡用卡通打光加描邊顯示,和動漫角色同一種畫法;木紋和布紋是遊戲端畫的可重複花紋,靠模型裡以公尺為單位的貼圖座標貼上去,紋路順著每個零件的長邊;地毯、窗景、掛畫、螢幕畫面是遊戲端畫的。
 - 音樂:HoliznaCC0 的 lo-fi 曲目(Winter Lofi、Public Domain Lofi、Summer Air 三張專輯共 10 首),CC0。檔案在 `public/assets/music/`,經過重新壓縮;曲目清單在同資料夾的 `LICENSE.txt`。
 - 各資料夾內有 `LICENSE.txt`。

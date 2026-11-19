@@ -38,8 +38,24 @@ class Model:
             self.mats.append(name)
         return self.mats.index(name)
 
-    def _merge(self, tmp, mat, loc, rot, outline):
-        """把暫存的形狀轉到定位、指定材質,併入模型(需要描邊的另存一份)。"""
+    def _merge(self, tmp, mat, loc, rot, outline, dims=(1, 1, 1)):
+        """把暫存的形狀轉到定位、指定材質,併入模型(需要描邊的另存一份)。
+
+        同時替零件加上貼圖座標(單位是公尺):每個面照它朝向的那一軸做平面投影,
+        u 軸取零件最長的那一邊,木紋才會順著桌腳、層板的長向走。每個零件隨機偏移,紋路才不會一模一樣。
+        """
+        uv = tmp.loops.layers.uv.new('UVMap')
+        tmp.normal_update()
+        self.parts = getattr(self, 'parts', 0) + 1
+        ou, ov = (self.parts * 0.37) % 1.0, (self.parts * 0.61) % 1.0
+        grain = max(range(3), key=lambda i: dims[i])
+        for f in tmp.faces:
+            a = max(range(3), key=lambda i: abs(f.normal[i]))
+            plane = [i for i in range(3) if i != a]
+            u_ax = grain if grain in plane else max(plane, key=lambda i: dims[i])
+            v_ax = plane[0] if plane[1] == u_ax else plane[1]
+            for l in f.loops:
+                l[uv].uv = (l.vert.co[u_ax] + ou, l.vert.co[v_ax] + ov)
         M = Matrix.Translation(Vector(loc)) @ Euler(rot, 'XYZ').to_matrix().to_4x4()
         bmesh.ops.transform(tmp, matrix=M, verts=tmp.verts)
         idx = self.mat(mat)
@@ -62,7 +78,7 @@ class Model:
         b = min(bevel, min(size) * 0.49)
         if b > 0.0005:
             bmesh.ops.bevel(tmp, geom=tmp.edges[:], offset=b, segments=seg, profile=0.5, affect='EDGES')
-        self._merge(tmp, mat, loc, rot, outline)
+        self._merge(tmp, mat, loc, rot, outline, dims=size)
 
     def cyl(self, r1, r2, depth, loc, mat, segs=28, rot=(0, 0, 0), bevel=0.0, outline=True):
         """圓柱或圓錐台,軸向為 Z。r1 是底部半徑、r2 是頂部半徑。"""
@@ -71,13 +87,13 @@ class Model:
         if bevel > 0.0005:
             rim = [e for e in tmp.edges if abs(e.verts[0].co.z - e.verts[1].co.z) < 1e-6]
             bmesh.ops.bevel(tmp, geom=rim, offset=min(bevel, depth * 0.45), segments=2, profile=0.5, affect='EDGES')
-        self._merge(tmp, mat, loc, rot, outline)
+        self._merge(tmp, mat, loc, rot, outline, dims=(max(r1, r2) * 2, max(r1, r2) * 2, depth))
 
     def ball(self, r, loc, mat, scale=(1, 1, 1), rot=(0, 0, 0), outline=True):
         tmp = bmesh.new()
         bmesh.ops.create_uvsphere(tmp, u_segments=20, v_segments=12, radius=r)
         bmesh.ops.scale(tmp, vec=Vector(scale), verts=tmp.verts)
-        self._merge(tmp, mat, loc, rot, outline)
+        self._merge(tmp, mat, loc, rot, outline, dims=tuple(r * 2 * k for k in scale))
 
     def quad(self, w, h, loc, mat, rot=(0, 0, 0), uv=((0, 0), (1, 0), (1, 1), (0, 1))):
         """朝 -Y 的平面,預設 UV 鋪滿 0–1(螢幕、窗景、掛畫用,遊戲端貼圖)。"""
@@ -94,6 +110,11 @@ class Model:
         for v in self.ol.verts:
             v.co += v.normal * OUTLINE
         bmesh.ops.reverse_faces(self.ol, faces=self.ol.faces[:])
+        ol_uv = self.ol.loops.layers.uv.get('UVMap')
+        if ol_uv:  # 描邊不需要貼圖座標,歸零讓頂點可以合併、檔案比較小
+            for f in self.ol.faces:
+                for l in f.loops:
+                    l[ol_uv].uv = (0, 0)
         oi = self.mat('outline')
         for f in self.ol.faces:
             f.material_index = oi

@@ -368,6 +368,41 @@ const artTex = () => canvasTex('art', 256, 344, (c, w, h) => { // 掛畫:海邊�
 });
 const TEX = { screen: screenTex, poster: posterTex, art: artTex, sky: () => skyTex(mood) };
 
+// 木紋與布紋:可以無限重複的淡色花紋,會和家具本身的顏色相乘,所以換色之後紋路還在
+// 模型的貼圖座標單位是公尺,repeat 決定一張圖鋪多大
+const rnd01 = (n) => { const v = Math.sin(n * 127.1 + 311.7) * 43758.5453; return v - Math.floor(v); };
+function tileTex(key, draw, repU, repV) {
+  const t = canvasTex(key, 256, 256, draw);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(repU, repV); t.anisotropy = 8;
+  return t;
+}
+const woodTex = () => tileTex('grainWood', (c, w, h) => { // 一張 = 長 0.9 公尺 × 寬 0.36 公尺,紋路順著 u 方向
+  c.fillStyle = '#ffffff'; c.fillRect(0, 0, w, h);
+  for (let i = 0; i < 34; i++) {
+    const y0 = rnd01(i) * h, amp = 1.5 + rnd01(i + 50) * 3.5, ph = rnd01(i + 90) * 7, per = 1 + Math.floor(rnd01(i + 20) * 2);
+    c.strokeStyle = '#8a5a34'; c.globalAlpha = 0.07 + rnd01(i + 70) * 0.13; c.lineWidth = 1 + rnd01(i + 30) * 2.2;
+    for (const dy of [-h, 0, h]) { // 上下各多畫一次,接縫才接得起來
+      c.beginPath();
+      for (let x = 0; x <= w; x += 8) { const y = y0 + dy + Math.sin((x / w) * Math.PI * 2 * per + ph) * amp; if (x) c.lineTo(x, y); else c.moveTo(x, y); }
+      c.stroke();
+    }
+  }
+  c.globalAlpha = 0.05; c.fillStyle = '#8a5a34'; // 幾條寬一點的色帶,像不同深淺的年輪
+  for (let i = 0; i < 5; i++) { const y = rnd01(i + 200) * h, hh = 10 + rnd01(i + 210) * 22; for (const dy of [-h, 0, h]) c.fillRect(0, y + dy, w, hh); }
+  c.globalAlpha = 1;
+}, 1 / 0.9, 1 / 0.36);
+const fabricTex = () => tileTex('grainFabric', (c, w, h) => { // 一張 = 0.14 公尺見方的平織布紋
+  c.fillStyle = '#ffffff'; c.fillRect(0, 0, w, h);
+  const n = 32, s = w / n;
+  for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
+    const over = (i + j) % 2 === 0;
+    c.globalAlpha = (over ? 0.1 : 0.03) + rnd01(i * 37 + j) * 0.05; c.fillStyle = '#4a4660';
+    if (over) c.fillRect(i * s + 1, j * s, s - 2, s); else c.fillRect(i * s, j * s + 1, s, s - 2);
+  }
+  c.globalAlpha = 1;
+}, 1 / 0.14, 1 / 0.14);
+const GRAIN = { wood: woodTex, woodDark: woodTex, fabric: fabricTex, fabric2: fabricTex, cream: fabricTex };
+
 // 卡通材質:三階明暗;描邊、螢幕、窗景等用不受光的材質
 const toonRamp = new THREE.DataTexture(new Uint8Array([150, 200, 236]), 3, 1, THREE.RedFormat);
 toonRamp.minFilter = toonRamp.magFilter = THREE.NearestFilter; toonRamp.needsUpdate = true;
@@ -381,7 +416,8 @@ function toonMat(name, hex) {
     else if (name === 'mirror') m = new THREE.MeshBasicMaterial({ color: '#dbeef6' });
     else {
       // 燈罩自己發亮但不受其他燈影響,亮度固定,晚上才會有一點光暈
-      m = name === 'shade' ? new THREE.MeshBasicMaterial({ color: new THREE.Color('#fff0d0').multiplyScalar(1.22) }) : new THREE.MeshToonMaterial({ color: hex, gradientMap: toonRamp });
+      m = name === 'shade' ? new THREE.MeshBasicMaterial({ color: new THREE.Color('#fff0d0').multiplyScalar(1.22) })
+        : new THREE.MeshToonMaterial({ color: hex, gradientMap: toonRamp, map: GRAIN[name] ? GRAIN[name]() : null });
     }
     m.name = name;
     toonCache.set(key, m);
