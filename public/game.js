@@ -74,12 +74,32 @@ function connect() {
   };
 }
 
+// ---------- 本機備份:伺服器的資料不見時(例如免費主機重啟)自動還原 ----------
+// 進度一有變動就在這個瀏覽器存一份;連上線發現伺服器不認得這個存檔碼時,把備份送回去。
+let restoring = false, backupTimer = 0;
+function loadBackup() {
+  try { const b = JSON.parse(store.get('yoyo_backup')); return b && b.tk === token && b.data ? b : null; } catch { return null; }
+}
+function saveBackup() {
+  clearTimeout(backupTimer);
+  backupTimer = setTimeout(() => {
+    if (restoring || !profile || !room) return;
+    const data = {
+      name: profile.name, avatar: profile.avatar, totalMinutes: profile.totalMinutes, sessions: profile.sessions, days: profile.days,
+      status: $('#statusInput').value, pose: players.get(me)?.pose || 0, todos, habits,
+      // 在朋友的房間時,沿用上次存的自己房間
+      room: room.mine ? { code: room.code, wall: room.wall, floor: room.floor, guestsEdit: room.guestsEdit, items: room.items } : loadBackup()?.data.room,
+    };
+    store.set('yoyo_backup', JSON.stringify({ tk: token, at: Date.now(), data }));
+  }, 800);
+}
 // 載入畫面:連上線、家具模型也都載完才收起來,過程中顯示進度
 let netReady = false, loadedN = 0;
 function refreshOverlay() {
   if (kicked) return;
   const done = netReady && modelsLoaded;
   $('#overlay').hidden = done;
+  if (restoring) { $('#overlay').hidden = false; $('#overlayText').textContent = '正在還原你的進度…'; return; }
   if (!done) $('#overlayText').textContent = netReady ? `正在佈置房間… ${Math.round((loadedN / SFILES.length) * 100)}%` : '連線中…';
 }
 function addPlayer(p) {
@@ -105,6 +125,8 @@ const on = {
     setParty(null);
     m.players.forEach(addPlayer);
     setProfile(m.profile, true);
+    const backup = m.fresh && loadBackup();
+    if (backup) { restoring = true; send({ t: 'restore', data: backup.data }); } // 伺服器不認得我們:把備份送回去,還原後重新載入
     netReady = true; refreshOverlay();
     $('#roomCode').textContent = room.code;
     $('#goHome').hidden = room.mine;
@@ -120,7 +142,10 @@ const on = {
     setView(view);
     sysLog(room.mine ? '歡迎回到你的房間 ✨' : `你來到了 ${room.ownerName || '朋友'} 的房間`);
     if (m.notice) toast(m.notice);
+    saveBackup();
+    if (!backup && !store.get('yoyo_tips')) $('#tips').hidden = false; // 第一次來:顯示操作提示
   },
+  restored() { location.href = room?.mine ? location.pathname : location.href; },
   join(m) { addPlayer(m.p); sysLog(`${m.p.name} 進來了`); toast(`${m.p.name} 進來了`); refreshMembers(); },
   leave(m) {
     const p = players.get(m.id);
@@ -152,8 +177,9 @@ const on = {
     if (!canEdit()) setHolding(null);
     rebuildRoom();
     refreshRoomUI();
+    saveBackup();
   },
-  profile(m) { setProfile(m.profile); },
+  profile(m) { setProfile(m.profile); saveBackup(); },
   party(m) { setParty(m.party); },
   party_done(m) {
     const now = performance.now();
@@ -1501,9 +1527,9 @@ $('#focusBtn').addEventListener('click', () => {
 let statusTimer = 0;
 $('#statusInput').addEventListener('input', (ev) => {
   clearTimeout(statusTimer);
-  statusTimer = setTimeout(() => send({ t: 'status', text: ev.target.value }), 400);
+  statusTimer = setTimeout(() => { send({ t: 'status', text: ev.target.value }); saveBackup(); }, 400);
 });
-$('#poses').addEventListener('click', (ev) => { const b = ev.target.closest('button'); if (b) { setPose(+b.dataset.pose); send({ t: 'status', pose: +b.dataset.pose }); } });
+$('#poses').addEventListener('click', (ev) => { const b = ev.target.closest('button'); if (b) { setPose(+b.dataset.pose); send({ t: 'status', pose: +b.dataset.pose }); saveBackup(); } });
 function setPose(i) { document.querySelectorAll('#poses button').forEach((x) => x.classList.toggle('on', +x.dataset.pose === i)); }
 
 // ---------- 小卡片收合:專注時只留時間,房間才是主角 ----------
@@ -1538,7 +1564,7 @@ function renderTodos() {
   const left = todos.filter((x) => !x.done).length;
   $('#todoCount').textContent = left ? left : '';
 }
-function saveTodos() { renderTodos(); send({ t: 'todos', list: todos }); }
+function saveTodos() { renderTodos(); send({ t: 'todos', list: todos }); saveBackup(); }
 $('#todoForm').addEventListener('submit', (ev) => {
   ev.preventDefault();
   const v = $('#todoInput').value.trim();
@@ -1593,7 +1619,7 @@ function renderHabits() {
   const left = habits.filter((h) => !h.days.includes(today)).length;
   $('#habitCount').textContent = left ? left : '';
 }
-function saveHabits() { renderHabits(); send({ t: 'habits', list: habits }); }
+function saveHabits() { renderHabits(); send({ t: 'habits', list: habits }); saveBackup(); }
 $('#habitForm').addEventListener('submit', (ev) => {
   ev.preventDefault();
   const v = $('#habitInput').value.trim();
@@ -2026,6 +2052,7 @@ function chime() {
 }
 
 applyQuality();
+$('#tipsOk').addEventListener('click', () => { $('#tips').hidden = true; store.set('yoyo_tips', '1'); });
 window.__booted = true;
 connect();
 tickClock();

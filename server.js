@@ -254,6 +254,14 @@ function freeSpot(room) {
   return [x + 0.35 + Math.random() * 0.3, y + 0.35 + Math.random() * 0.3];
 }
 
+// 待辦與習慣:收到的清單一律重新整理成乾淨的格式
+const cleanTodos = (list) => (Array.isArray(list) ? list : []).slice(0, MAX_TODOS)
+  .map((x) => ({ text: cleanText(x && x.text, 60), done: !!(x && x.done) })).filter((x) => x.text);
+const cleanHabits = (list) => (Array.isArray(list) ? list : []).slice(0, MAX_HABITS).map((x) => ({
+  name: cleanText(x && x.name, 20),
+  days: [...new Set(Array.isArray(x && x.days) ? x.days.filter((d) => typeof d === 'string' && DATE_RE.test(d)) : [])].sort().slice(-KEEP_DAYS),
+})).filter((x) => x.name);
+
 // ---------- 連線狀態 ----------
 const live = new Map(); // room code -> Set<client>
 const byKey = new Map(); // profile key -> client
@@ -335,6 +343,7 @@ const handlers = {
     c.key = hashToken(m.token);
     const old = byKey.get(c.key);
     if (old) { send(old, { t: 'kicked' }); leave(old); old.ws.close(); }
+    c.fresh = !profiles[c.key]; // 這個存檔碼伺服器沒看過(新玩家,或伺服器的資料被清掉了)
     const p = (c.profile = getProfile(c.key));
     if (Number.isInteger(m.tz) && Math.abs(m.tz) <= 840) p.tz = m.tz;
     byKey.set(c.key, c);
@@ -354,7 +363,7 @@ const handlers = {
       t: 'init', me: p.pid, profile: selfProfile(p),
       room: { ...roomView(room), mine: room.ownerKey === c.key, ownerName: profiles[room.ownerKey]?.name || '' },
       players: [...set].map(pub).concat(pub(c)),
-      catalog: CATALOG, cols: COLS, rows: ROWS, emotes: EMOTES, notice,
+      catalog: CATALOG, cols: COLS, rows: ROWS, emotes: EMOTES, notice, fresh: c.fresh,
       presets: Object.entries(PRESETS).map(([key, p]) => ({ key, name: p.name })),
     });
     if (reward) send(c, { t: 'focus_done', ...reward, offline: true });
@@ -451,19 +460,14 @@ const handlers = {
   // 每日習慣:整份覆蓋;days 是打勾過的日期
   habits(c, m) {
     if (!Array.isArray(m.list)) return;
-    c.profile.habits = m.list.slice(0, MAX_HABITS).map((x) => ({
-      name: cleanText(x && x.name, 20),
-      days: [...new Set(Array.isArray(x && x.days) ? x.days.filter((d) => typeof d === 'string' && DATE_RE.test(d)) : [])].sort().slice(-KEEP_DAYS),
-    })).filter((x) => x.name);
+    c.profile.habits = cleanHabits(m.list);
     markDirty();
   },
 
   // 待辦清單:整份覆蓋
   todos(c, m) {
     if (!Array.isArray(m.list)) return;
-    c.profile.todos = m.list.slice(0, MAX_TODOS)
-      .map((x) => ({ text: cleanText(x && x.text, 60), done: !!(x && x.done) }))
-      .filter((x) => x.text);
+    c.profile.todos = cleanTodos(m.list);
     markDirty();
   },
 
@@ -523,6 +527,45 @@ const handlers = {
     if (!room || room.ownerKey !== c.key) return;
     room.guestsEdit = !!m.guestsEdit;
     roomChanged(room);
+  },
+
+  // 還原:伺服器的資料不見時(例如免費主機重啟),瀏覽器把自己留的備份送回來。
+  // 只有這次連線才剛建立的全新存檔可以還原一次,所有內容都重新檢查過才寫入。
+  restore(c, m) {
+    if (!c.fresh) return;
+    c.fresh = false;
+    const p = c.profile, b = m.data;
+    if (!b || typeof b !== 'object') return;
+    const int = (v, max) => clamp(Math.floor(Number(v)) || 0, 0, max);
+    p.name = cleanText(b.name, 16) || p.name;
+    if (b.avatar && typeof b.avatar === 'object') for (const [k, n] of Object.entries(AVATAR_RANGES)) if (Number.isInteger(b.avatar[k]) && b.avatar[k] >= 0 && b.avatar[k] < n) p.avatar[k] = b.avatar[k];
+    p.totalMinutes = int(b.totalMinutes, 5e6); p.sessions = int(b.sessions, 5e5);
+    p.status = cleanText(b.status, 24); p.pose = Number.isInteger(b.pose) && b.pose >= 0 && b.pose < POSES ? b.pose : 0;
+    p.todos = cleanTodos(b.todos); p.habits = cleanHabits(b.habits);
+    p.days = {};
+    if (b.days && typeof b.days === 'object') for (const [k, v] of Object.entries(b.days).slice(-KEEP_DAYS)) if (DATE_RE.test(k) && int(v, 1440)) p.days[k] = int(v, 1440);
+    const r = rooms[p.room], rb = b.room;
+    if (r && rb && typeof rb === 'object') {
+      const items = [];
+      for (const raw of (Array.isArray(rb.items) ? rb.items : []).slice(0, MAX_ITEMS)) {
+        if (!raw || typeof raw !== 'object') continue;
+        const type = ALIAS[raw.type] || raw.type, rot = rotOf(raw.r);
+        if (typeof type !== 'string' || !Object.hasOwn(CATALOG, type) || !canPlace(items, type, raw.x, raw.y, rot)) continue;
+        items.push({ id: items.length + 1, type, x: raw.x, y: raw.y, ...(rot && CATALOG[type].kind !== 'wall' ? { r: rot } : {}), ...(colOf(raw.c) ? { c: colOf(raw.c) } : {}) });
+      }
+      if (items.length) { r.items = items; r.nextId = items.length + 1; }
+      for (const k of ['wall', 'floor']) if (Number.isInteger(rb[k]) && rb[k] >= 0 && rb[k] < THEME_COUNT) r[k] = rb[k];
+      r.guestsEdit = !!rb.guestsEdit;
+      // 房號也換回原本的,之前發出去的邀請連結才不會失效(那個房號要還沒被別人用掉)
+      const old = r.code, others = [...(live.get(old) || [])].some((x) => x !== c);
+      if (typeof rb.code === 'string' && /^[A-Z0-9]{6}$/.test(rb.code) && !rooms[rb.code] && !others) {
+        delete rooms[old]; r.code = rb.code; rooms[r.code] = r; p.room = r.code;
+        const set = live.get(old);
+        if (set) { live.delete(old); live.set(r.code, set); for (const x of set) x.room = r.code; }
+      }
+    }
+    markDirty();
+    send(c, { t: 'restored' });
   },
 
   // 檢查存檔碼是否存在(換裝置時用)
@@ -609,7 +652,7 @@ const server = http.createServer((req, res) => {
 });
 const GZ = new Map(); // 壓縮結果快取(只快取不會變動的 vendor / assets 檔案)
 
-const wss = new WebSocketServer({ server, maxPayload: 4096 });
+const wss = new WebSocketServer({ server, maxPayload: 65536 }); // 還原備份時一次會送整份存檔
 wss.on('connection', (ws) => {
   const c = { ws, key: null, profile: null, room: null, x: 0, y: 0, tokens: 20, last: Date.now(), alive: true };
   ws.on('pong', () => { c.alive = true; });
