@@ -108,6 +108,7 @@ function addPlayer(p) {
   const now = performance.now();
   Object.assign(o, { id: p.id, name: p.name, avatar: p.avatar, tx: p.x, ty: p.y, totalMinutes: p.totalMinutes, status: p.status, pose: p.pose });
   // 伺服器給的是「還剩多久 / 已經過多久」,換算成本機時間軸
+  if (p.focus?.phase === 'break' && o.focus?.phase === 'focus') o.stretchPending = true; // 剛進入休息:離開座位站定之後伸個懶腰
   o.focus = p.focus ? { ...p.focus, endAt: now + p.focus.left, startAt: now - p.focus.elapsed } : null;
   players.set(p.id, o);
   syncPlayerObj(o);
@@ -354,9 +355,10 @@ const ITEMS = {
   window: { m: 'window' }, painting: { m: 'frame' }, poster: { m: 'poster' }, clock: { m: 'clock' }, shelf: { m: 'wallshelf' }, wlamp: { m: 'walllamp', lamp: 1.95 }, mirror: { m: 'mirror' },
 };
 // 角色配件:掛在頭部骨架上。top = 以頭頂(含頭髮)為基準往上放
-// fit = 模型原本的頭帶高度:依角色的頭髮高度等比例放大,耳機才會套在頭髮外面
-const ACCS = [null, { m: 'acc_headphones', name: '耳機', fit: 0.183 }, { m: 'acc_glasses', name: '眼鏡' }, { m: 'acc_catears', name: '貓耳', top: -0.07, scale: 1.4 }, { m: 'acc_beret', name: '貝雷帽', top: -0.032, scale: 1.08 }];
-const SFILES = [...new Set(Object.values(ITEMS).map((k) => k.m)), 'door', 'cat_walk', ...ACCS.filter(Boolean).map((k) => k.m)];
+// 頭飾:fit = 模型原本的頭帶高度,會依角色的頭髮高度等比例放大,耳機才套得在頭髮外面;top = 以頭頂(含頭髮)為基準
+const ACCS = [null, { m: 'acc_headphones', name: '耳機', fit: 0.183 }, { m: 'acc_catears', name: '貓耳', top: -0.07, scale: 1.4 }, { m: 'acc_beret', name: '貝雷帽', top: -0.032, scale: 1.08 }];
+const GLASSES = { m: 'acc_glasses' };
+const SFILES = [...new Set(Object.values(ITEMS).map((k) => k.m)), 'door', 'cat_walk', ...ACCS.filter(Boolean).map((k) => k.m), GLASSES.m];
 const MODEL = {}, SBB = {}, STINT = {}; // 模型、外框、可否換色
 let modelsLoaded = false;
 // 換色:有布料的家具換布料顏色,其餘換木頭顏色(0 = 原色)
@@ -806,13 +808,15 @@ function buildAvatar(a, onReady) {
     for (const n of BONES) bone[n] = H.getNormalizedBoneNode(n);
     // 配件:量出頭頂(含頭髮)比頭部骨架高多少,帽子和貓耳才不會埋在頭髮裡
     vrm.scene.updateMatrixWorld(true);
-    const headY = bone.head.getWorldPosition(new THREE.Vector3()).y, acc = ACCS[a.acc];
-    if (acc) {
+    const headY = bone.head.getWorldPosition(new THREE.Vector3()).y, worn = [ACCS[a.acc], a.glasses ? GLASSES : null].filter(Boolean);
+    if (worn.length) {
       const top = (new THREE.Box3().setFromObject(vrm.scene).max.y - headY) / AV_SCALE;
       const wear = () => {
         if (g.userData.dead) return;
-        const m = sput(bone.head, acc.m, { y: acc.top != null ? top + acc.top : 0, ry: Math.PI });
-        m.scale.setScalar(acc.fit ? Math.max(1, (top + 0.015) / acc.fit) : acc.scale || 1);
+        for (const acc of worn) {
+          const m = sput(bone.head, acc.m, { y: acc.top != null ? top + acc.top : 0, ry: Math.PI, c: a.accColor });
+          m.scale.setScalar(acc.fit ? Math.max(1, (top + 0.015) / acc.fit) : acc.scale || 1);
+        }
       };
       if (modelsLoaded) wear(); else modelsReady.then(wear);
     }
@@ -889,6 +893,12 @@ function poseAvatar(g, dt, st) {
     P.spine = [breathe, 0, sin(t * 0.7) * 0.015]; P.head = [0, sin(t * 0.31) * 0.08, 0];
     P.leftUpperLeg = [0, 0, 0.03]; P.rightUpperLeg = [0, 0, -0.03];
   }
+  if (st.stretching && mode === 'idle') { // 伸懶腰:雙手高舉、身體微微後仰、閉眼
+    const k2 = sin(t * 2.2) * 0.06;
+    P.leftUpperArm = [0, 0, 1.28 + k2]; P.rightUpperArm = [0, 0, -1.28 - k2];
+    P.leftLowerArm = [0, -0.25, 0]; P.rightLowerArm = [0, 0.25, 0];
+    P.spine = [-0.1, 0, 0]; P.chest = [-0.08, 0, 0]; P.head = [-0.18, 0, 0];
+  }
   if (st.waving && mode !== 'walk' && mode !== 'cheer') { // 舉起右手左右揮
     P.rightUpperArm = [0, 0, -0.95]; P.rightLowerArm = [0, 0.75 + sin(t * 11) * 0.45, 0]; P.rightHand = [0, 0, 0];
     P.head = [(P.head?.[0] || 0) - 0.05, P.head?.[1] || 0, -0.08];
@@ -907,7 +917,7 @@ function poseAvatar(g, dt, st) {
     u.blinkAt -= dt;
     if (u.blinkAt < 0) { u.blink = 0.14; u.blinkAt = 2 + Math.random() * 4; }
     u.blink = Math.max(0, u.blink - dt);
-    em.setValue('blink', u.blink > 0 ? 1 - Math.abs(u.blink - 0.07) / 0.07 : 0);
+    em.setValue('blink', st.stretching && mode === 'idle' ? 1 : u.blink > 0 ? 1 - Math.abs(u.blink - 0.07) / 0.07 : 0);
     em.setValue('happy', mode === 'cheer' || st.happy ? 1 : 0);
   }
   // 視線:站著時看鏡頭,坐著時看桌面
@@ -1344,10 +1354,11 @@ function frame(t) {
     diff = Math.atan2(Math.sin(diff), Math.cos(diff));
     p.obj.rotation.y += diff * Math.min(1, dt * 12);
     p.heading = p.obj.rotation.y;
+    if (p.stretchPending && !walking && !sitting) { p.stretchPending = false; p.stretchUntil = t + 4200; }
     const fwd = sitting && p.seat ? p.seat.fwd : 0;
     p.sit = (p.sit || 0) + (fwd - (p.sit || 0)) * Math.min(1, dt * 8);
     p.obj.position.set(p.x + Math.sin(p.obj.rotation.y) * p.sit, 0, p.y + Math.cos(p.obj.rotation.y) * p.sit);
-    poseAvatar(p.obj, dt, { walking, sitting, pose: p.pose, waving: p.waveUntil > t, happy: p.happyUntil > t, noDesk: !p.seat || p.seat.desk == null, cheering: p.cheerUntil > t, seatH: p.seat?.h, ownStool: !p.seat, t });
+    poseAvatar(p.obj, dt, { walking, sitting, pose: p.pose, waving: p.waveUntil > t, happy: p.happyUntil > t, stretching: p.stretchUntil > t, noDesk: !p.seat || p.seat.desk == null, cheering: p.cheerUntil > t, seatH: p.seat?.h, ownStool: !p.seat, t });
     p.labelY = (p.labelY || AVATAR_H) + ((sitting ? 1.42 : AVATAR_H) - (p.labelY || AVATAR_H)) * Math.min(1, dt * 6);
     // 標籤
     tmpV.set(p.x, p.labelY + 0.14, p.y).project(camera);
@@ -1900,12 +1911,14 @@ function buildAvatarOptions() {
     ['造型', 'hair', LOOK_NAMES.map((n) => ({ text: n }))],
     ['髮色', 'hairColor', HAIRC.map((c) => (c ? { color: c } : { text: '原色' }))],
     ['上衣', 'shirt', SHIRT.map((c) => (c ? { color: c } : { text: '原色' }))],
-    ['配件', 'acc', ACCS.map((k) => ({ text: k ? k.name : '無' }))],
+    ['頭飾', 'acc', ACCS.map((k) => ({ text: k ? k.name : '無' }))],
+    ['眼鏡', 'glasses', [{ text: '不戴' }, { text: '戴上' }]],
+    ['頭飾顏色', 'accColor', FABRICS.map((c) => (c ? { color: c } : { text: '原色' }))],
   ];
   $('#avatarOptions').replaceChildren(...rows.flatMap(([title, key, opts]) => [
     el('h3', { textContent: title }),
     el('div', { className: 'swatches' }, ...opts.map((o, i) => {
-      const b = el('button', { type: 'button', className: draft.avatar[key] === i ? 'on' : '', textContent: o.text || '', title: o.text || `${title} ${i + 1}` });
+      const b = el('button', { type: 'button', className: (draft.avatar[key] || 0) === i ? 'on' : '', textContent: o.text || '', title: o.text || `${title} ${i + 1}` });
       if (o.color) b.style.background = o.color; else b.classList.add('txt');
       b.onclick = () => { draft.avatar[key] = i; buildAvatarOptions(); pushProfile(); };
       return b;

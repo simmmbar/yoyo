@@ -70,7 +70,8 @@ const ALIAS = {
   bookshelf: 'widecase', sofa: 'ksofa', dsofa: 'ksofa', armchair: 'lchair', bunk: 'bed', tv: 'tv2', claw: 'arcade', pinball: 'arcade',
   lamp: 'flamp', flamp2: 'flamp', tree: 'bigplant', tspk: 'radio', obox: 'box', wcab: 'painting', aquarium: 'tv2', bear: 'tplant',
 };
-const AVATAR_RANGES = { skin: 5, hair: 6, hairColor: 7, shirt: 8, acc: 5 };
+// acc 頭飾(0 無、1 耳機、2 貓耳、3 貝雷帽)、glasses 眼鏡、accColor 配件顏色
+const AVATAR_RANGES = { skin: 5, hair: 6, hairColor: 7, shirt: 8, acc: 4, glasses: 2, accColor: 8 };
 const POSES = 4; // 專注姿勢:0 打字、1 站著、2 看書、3 寫字
 const MAX_FOCUS_MIN = 180, MAX_TODOS = 30, MAX_HABITS = 8, KEEP_DAYS = 70;
 const PARTY_COUNTDOWN = 20000; // 共同專注發起後,等大家加入的時間
@@ -89,6 +90,8 @@ const rooms = loadJson('rooms.json');       // code -> room
 for (const r of Object.values(rooms)) for (const it of r.items || []) if (ALIAS[it.type]) { it.type = ALIAS[it.type]; delete it.c; }
 // 舊存檔相容:房間從 8×6 縮成 6×5,放不下的舊房間換成預設書房(在 PRESETS 定義之後執行)
 const migrateRooms = () => { for (const r of Object.values(rooms)) if ((r.items || []).some((it) => !CATALOG[it.type] || it.x + dims(it.type, it.r)[0] > COLS || (CATALOG[it.type].kind !== 'wall' && it.y + dims(it.type, it.r)[1] > ROWS))) { r.items = presetItems('study'); r.nextId = r.items.length + 1; markDirty(); } };
+// 舊存檔相容:眼鏡原本是頭飾的其中一個選項(2),現在獨立出來,可以和頭飾一起戴
+for (const p of Object.values(profiles)) if (p.avatar && p.avatar.glasses === undefined) { const a = p.avatar; a.glasses = a.acc === 2 ? 1 : 0; a.acc = { 1: 1, 3: 2, 4: 3 }[a.acc] || 0; a.accColor = 0; }
 // 舊存檔相容:舊版的專注紀錄沒有模式欄位,直接清掉
 for (const p of Object.values(profiles)) if (p.focus && !p.focus.mode) p.focus = null;
 let dirty = false;
@@ -181,7 +184,7 @@ function getProfile(key) {
     p = profiles[key] = {
       pid: randCode(8),
       name: '旅人' + Math.floor(1000 + Math.random() * 9000),
-      avatar: { skin: 0, hair: Math.floor(Math.random() * 6), hairColor: 0, shirt: 0, acc: 0 },
+      avatar: { skin: 0, hair: Math.floor(Math.random() * 6), hairColor: 0, shirt: 0, acc: 0, glasses: 0, accColor: 0 },
       totalMinutes: 0, sessions: 0, focus: null, room: null, status: '', pose: 0, todos: [],
     };
     markDirty();
