@@ -244,7 +244,7 @@ function addLights(sc, shadows) {
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
     Object.assign(sun.shadow.camera, { left: -11, right: 11, top: 11, bottom: -11, near: 1, far: 40 });
-    sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.03; sun.shadow.radius = 5;
+    sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.03; sun.shadow.radius = 1.6; // 半徑太大陰影會出現顆粒
   }
   // 室內的暖色主燈:白天關著,黃昏和夜晚才亮
   const roomLight = new THREE.PointLight(0xffc48a, 0, 16, 1.5);
@@ -258,16 +258,16 @@ const LIGHTS = addLights(scene, true);
 const MOODS = {
   // lamp 燈具、glow 螢幕、neon 霓虹燈、beam 從窗戶照進來的光(顏色與強度)、wallE/floorE/ceilE 牆面、地板、天花板的自發光
   day:   { sky: 0xffeedd, ground: 0x8f7fc0, hemi: 0.9,  sun: 0xffdcb4, sunI: 2.2,  lamp: 0.3,  room: 0,   exp: 1.04, bloomT: 1.5,  bloomS: 0.1,
-           glow: 0.06, neon: 1.0, beam: [0xfff0d0, 2.5], wallE: 0.22, floorE: 0.1,  ceilE: 0.25, vig: 0 },
+           glow: 0.06, neon: 1.0, beam: [0xfff0d0, 2.5], wallE: 0.22, floorE: 0.1,  ceilE: 0.25, vig: 0.12, pend: '#efe7d6' },
   dusk:  { sky: 0xffd2b4, ground: 0x7a659e, hemi: 0.78, sun: 0xff9a62, sunI: 1.5,  lamp: 0.7,  room: 3,   exp: 1.05, bloomT: 1.3,  bloomS: 0.16,
-           glow: 0.16, neon: 1.6, beam: [0xffb07a, 5],   wallE: 0.16, floorE: 0.08, ceilE: 0.16, vig: 0.25 },
+           glow: 0.16, neon: 1.6, beam: [0xffb07a, 5],   wallE: 0.16, floorE: 0.08, ceilE: 0.16, vig: 0.25, pend: '#fff0c4' },
   // 夜晚:大燈關掉,環境光壓暗偏藍,靠檯燈、螢幕、霓虹燈和月光照明
   night: { sky: 0x7486d8, ground: 0x1e1c3c, hemi: 0.36, sun: 0x8fa4ff, sunI: 0.22, lamp: 1.5,  room: 0.5, exp: 1.0,  bloomT: 1.1,  bloomS: 0.26,
-           glow: 0.26, neon: 1.5, beam: [0x9fb6ff, 9],   wallE: 0.05, floorE: 0.03, ceilE: 0.03, vig: 0.6 },
+           glow: 0.26, neon: 1.5, beam: [0x9fb6ff, 9],   wallE: 0.05, floorE: 0.03, ceilE: 0.03, vig: 0.6, pend: '#5c607f' },
 };
 let moodPref = store.get('yoyo_mood') || 'auto', mood = 'day';
 const autoMood = () => { const h = new Date().getHours() + new Date().getMinutes() / 60; return h < 6 || h >= 19 ? 'night' : h >= 17 || h < 7.5 ? 'dusk' : 'day'; };
-let lampLights = [], glowLights = [], neonLights = [], beamLights = [], ceilMesh = null;
+let lampLights = [], glowLights = [], neonLights = [], beamLights = [], ceilMesh = null, pendantMat = null;
 // 每盞燈的亮度:燈越多,每盞越暗,整間房才不會被照得像白天
 const lampLevel = () => MOODS[mood].lamp / Math.max(1, lampLights.length * 0.62);
 function applyMood() {
@@ -286,6 +286,7 @@ function applyMood() {
   for (const w of wallPlanes) w.material.emissiveIntensity = m.wallE;
   if (floorMesh) floorMesh.material.emissiveIntensity = m.floorE;
   if (ceilMesh) ceilMesh.material.emissiveIntensity = m.ceilE;
+  pendantMat?.color.set(m.pend);
   document.documentElement.style.setProperty('--vig', m.vig);
   document.body.dataset.mood = mood;
   return changed;
@@ -358,7 +359,7 @@ const ITEMS = {
 // 頭飾:fit = 模型原本的頭帶高度,會依角色的頭髮高度等比例放大,耳機才套得在頭髮外面;top = 以頭頂(含頭髮)為基準
 const ACCS = [null, { m: 'acc_headphones', name: '耳機', fit: 0.183 }, { m: 'acc_catears', name: '貓耳', top: -0.07, scale: 1.4 }, { m: 'acc_beret', name: '貝雷帽', top: -0.032, scale: 1.08 }];
 const GLASSES = { m: 'acc_glasses' };
-const SFILES = [...new Set(Object.values(ITEMS).map((k) => k.m)), 'door', 'cat_walk', ...ACCS.filter(Boolean).map((k) => k.m), GLASSES.m];
+const SFILES = [...new Set(Object.values(ITEMS).map((k) => k.m)), 'door', 'cat_walk', 'pendant', ...ACCS.filter(Boolean).map((k) => k.m), GLASSES.m];
 const MODEL = {}, SBB = {}, STINT = {}; // 模型、外框、可否換色
 let modelsLoaded = false;
 // 換色:有布料的家具換布料顏色,其餘換木頭顏色(0 = 原色)
@@ -787,14 +788,17 @@ function tintAvatar(vrm, a) {
     for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
       const n = m.name || '';
       const skin = /SKIN/.test(n) && a.skin > 0;
-      const tint = skin ? SKIN[a.skin] : /HAIR/.test(n) ? HAIRC[a.hairColor] : /Tops|Onepiece/.test(n) ? SHIRT[a.shirt] : null;
+      // 自己挑的顏色優先,沒有的話用舊版的色票編號
+      const tint = skin ? SKIN[a.skin] : /HAIR/.test(n) ? (a.hairHex || HAIRC[a.hairColor]) : /EyeIris/.test(n) ? a.eyeHex
+        : /Tops|Onepiece/.test(n) ? (a.topHex || SHIRT[a.shirt]) : /Bottoms/.test(n) ? a.bottomHex : null;
       if (!tint) continue;
       const old = m.map, oldShade = m.shadeMultiplyTexture;
       m.map = swap(old, tint, skin);
       m.shadeMultiplyTexture = oldShade === old ? m.map : swap(oldShade, tint, skin);
       if (m.uniforms?.map) m.uniforms.map.value = m.map;
       if (m.uniforms?.shadeMultiplyTexture) m.uniforms.shadeMultiplyTexture.value = m.shadeMultiplyTexture;
-      if (!skin) m.shadeColorFactor?.set(tint).multiplyScalar(0.72);
+      // 原本的顏色有一部分是另外乘在材質上的(例如深色頭髮配淺灰貼圖),換色時要歸零,選的顏色才準
+      if (!skin) { m.color?.set('#ffffff'); m.shadeColorFactor?.set(tint).multiplyScalar(0.72); }
     }
   });
 }
@@ -809,19 +813,24 @@ function buildAvatar(a, onReady) {
     VRMUtils.removeUnnecessaryVertices(vrm.scene);
     VRMUtils.rotateVRM0(vrm); // 舊版 VRM 面向 -z,轉成面向 +z
     tintAvatar(vrm, a);
-    vrm.scene.scale.setScalar(AV_SCALE);
+    // 身高(0.9–1.1 倍)與頭的大小(1–1.48 倍,越大越接近 Q 版)
+    const scale = AV_SCALE * (0.9 + (a.height ?? 4) * 0.025), headK = 1 + (a.headSize || 0) * 0.06;
+    vrm.scene.scale.setScalar(scale);
     g.add(vrm.scene);
     const H = vrm.humanoid, bone = {};
     for (const n of BONES) bone[n] = H.getNormalizedBoneNode(n);
-    // 配件:量出頭頂(含頭髮)比頭部骨架高多少,帽子和貓耳才不會埋在頭髮裡
+    // 量出頭頂(含頭髮)比頭部骨架高多少,帽子和貓耳才不會埋在頭髮裡
     vrm.scene.updateMatrixWorld(true);
-    const headY = bone.head.getWorldPosition(new THREE.Vector3()).y, worn = [ACCS[a.acc], a.glasses ? GLASSES : null].filter(Boolean);
+    const headY = bone.head.getWorldPosition(new THREE.Vector3()).y, top = (new THREE.Box3().setFromObject(vrm.scene).max.y - headY) / scale;
+    const rawHead = H.getRawBoneNode('head'); // 放大的是實際帶動模型的那根骨頭,頭髮和配件會跟著一起變大
+    rawHead.scale.setScalar(headK);
+    vrm.springBoneManager?.reset();
+    const worn = [ACCS[a.acc], a.glasses ? GLASSES : null].filter(Boolean);
     if (worn.length) {
-      const top = (new THREE.Box3().setFromObject(vrm.scene).max.y - headY) / AV_SCALE;
       const wear = () => {
         if (g.userData.dead) return;
         for (const acc of worn) {
-          const m = sput(bone.head, acc.m, { y: acc.top != null ? top + acc.top : 0, ry: Math.PI, c: a.accColor });
+          const m = sput(rawHead, acc.m, { y: acc.top != null ? top + acc.top : 0, ry: Math.PI, c: a.accColor });
           m.scale.setScalar(acc.fit ? Math.max(1, (top + 0.015) / acc.fit) : acc.scale || 1);
         }
       };
@@ -829,7 +838,7 @@ function buildAvatar(a, onReady) {
     }
     const gaze = new THREE.Object3D(); scene.add(gaze);
     if (vrm.lookAt) vrm.lookAt.target = gaze;
-    g.userData = { ...g.userData, ready: true, vrm, bone, gaze, headY, hipsY: bone.hips.position.y, flip: vrm.meta?.metaVersion === '0' ? -1 : 1, blinkAt: 2, blink: 0, ph: Math.random() * 6, seat: null, book: null };
+    g.userData = { ...g.userData, ready: true, vrm, bone, gaze, headY, scale, tall: headY + top * headK * scale, face: a.face || 0, hipsY: bone.hips.position.y, flip: vrm.meta?.metaVersion === '0' ? -1 : 1, blinkAt: 2, blink: 0, ph: Math.random() * 6, seat: null, book: null };
     poseAvatar(g, 0, {});
     onReady?.(g);
   }).catch((e) => console.error('avatar load failed', e));
@@ -874,7 +883,7 @@ function poseAvatar(g, dt, st) {
     P.head = [-0.15, 0, 0]; hipsY += b * 0.05 - 0.03;
   } else if (st.sitting) {
     mode = 'sit';
-    hipsY = (st.seatH || 0.42) / AV_SCALE + 0.09;
+    hipsY = (st.seatH || 0.42) / u.scale + 0.09;
     P.leftUpperLeg = [-1.5, 0, 0.06]; P.rightUpperLeg = [-1.5, 0, -0.06];
     P.leftLowerLeg = [1.45, 0, 0]; P.rightLowerLeg = [1.45, 0, 0];
     P.spine = [0.1 + breathe, 0, 0]; P.chest = [0.05, 0, 0];
@@ -925,7 +934,8 @@ function poseAvatar(g, dt, st) {
     if (u.blinkAt < 0) { u.blink = 0.14; u.blinkAt = 2 + Math.random() * 4; }
     u.blink = Math.max(0, u.blink - dt);
     em.setValue('blink', st.stretching && mode === 'idle' ? 1 : u.blink > 0 ? 1 - Math.abs(u.blink - 0.07) / 0.07 : 0);
-    em.setValue('happy', mode === 'cheer' || st.happy ? 1 : 0);
+    em.setValue('happy', mode === 'cheer' || st.happy ? 1 : u.face === 1 ? 0.4 : 0); // 平常的表情:自然 / 微笑 / 放鬆
+    em.setValue('relaxed', u.face === 2 && mode !== 'cheer' && !st.happy ? 0.75 : 0);
   }
   // 視線:站著時看鏡頭,坐著時看桌面
   if (mode === 'sit') g.localToWorld(tmpV2.set(0, 0.8, 0.55)); else tmpV2.copy(camera.position);
@@ -1018,6 +1028,9 @@ function buildShell() {
   ceil.rotation.x = Math.PI / 2; ceil.position.set(COLS / 2, WALLH, ROWS / 2);
   roomGroup.add(ceil); ceilMesh = ceil;
   sput(roomGroup, 'door', { x: COLS - 1.3, z: ROWS, ry: Math.PI }); // 房門(在前牆上,純裝飾)
+  // 天花板吊燈:燈罩的亮度跟著時段變(白天沒開、黃昏亮起、深夜關掉)
+  pendantMat = new THREE.MeshBasicMaterial({ color: MOODS[mood].pend });
+  sput(roomGroup, 'pendant', { x: COLS / 2, y: WALLH, z: ROWS / 2 + 0.3 }).traverse((o) => { if (o.isMesh && o.material.name === 'shade') { o.material = pendantMat; o.castShadow = false; } });
   floorMesh = new THREE.Mesh(new THREE.PlaneGeometry(COLS, ROWS), new THREE.MeshLambertMaterial({ emissive: '#ffffff', emissiveIntensity: 0.1 }));
   floorMesh.rotation.x = -Math.PI / 2; floorMesh.position.set(COLS / 2, 0, ROWS / 2); floorMesh.receiveShadow = true;
   roomGroup.add(floorMesh);
@@ -1246,7 +1259,7 @@ function snapshot(obj, cv, dir = VIEW_DIR, zoom = 1) {
   c2.clearRect(0, 0, cv.width, cv.height); c2.drawImage(thumb.domElement, 0, 0, cv.width, cv.height);
 }
 const FRONT_DIR = new THREE.Vector3(0.35, 0.25, 1).normalize();
-let previewSeq = 0;
+let previewSeq = 0, previewTimer = 0;
 function renderAvatarPreview() {
   if (!draft) return;
   const seq = ++previewSeq; // 只畫最後一次選擇
@@ -1255,7 +1268,7 @@ function renderAvatarPreview() {
       const cv = $('#avatarPreview'), c2 = cv.getContext('2d');
       thumbScene.add(g);
       // 半身:臉和配件看得清楚,上衣顏色也看得到
-      const cy = g.userData.headY - 0.24; // 以頭的高度為準,高矮不同的角色都框得到臉
+      const cy = g.userData.tall - 0.5; // 以頭頂的高度為準,高矮、頭大頭小都框得到臉
       thumbCam.position.set(0, cy, 0).addScaledVector(FRONT_DIR, 20); thumbCam.lookAt(0, cy, 0);
       Object.assign(thumbCam, { left: -0.55, right: 0.55, top: 0.55, bottom: -0.55 }); thumbCam.updateProjectionMatrix();
       thumb.render(thumbScene, thumbCam); thumbScene.remove(g);
@@ -1366,7 +1379,8 @@ function frame(t) {
     p.sit = (p.sit || 0) + (fwd - (p.sit || 0)) * Math.min(1, dt * 8);
     p.obj.position.set(p.x + Math.sin(p.obj.rotation.y) * p.sit, 0, p.y + Math.cos(p.obj.rotation.y) * p.sit);
     poseAvatar(p.obj, dt, { walking, sitting, pose: p.pose, waving: p.waveUntil > t, happy: p.happyUntil > t, stretching: p.stretchUntil > t, noDesk: !p.seat || p.seat.desk == null, cheering: p.cheerUntil > t, seatH: p.seat?.h, ownStool: !p.seat, t });
-    p.labelY = (p.labelY || AVATAR_H) + ((sitting ? 1.42 : AVATAR_H) - (p.labelY || AVATAR_H)) * Math.min(1, dt * 6);
+    const tall = p.obj.userData.tall || AVATAR_H; // 名字標籤跟著角色的實際高度
+    p.labelY = (p.labelY || tall) + ((sitting ? tall - 0.36 : tall) - (p.labelY || tall)) * Math.min(1, dt * 6);
     // 標籤
     tmpV.set(p.x, p.labelY + 0.14, p.y).project(camera);
     p.el.style.transform = `translate(${((tmpV.x + 1) / 2) * sw}px, ${((1 - tmpV.y) / 2) * sh}px) translate(-50%, -100%)`;
@@ -1782,7 +1796,7 @@ function composePhoto(job) {
     for (const id of job.ids) {
       const p = players.get(id);
       if (!p) continue;
-      tmpV.set(p.x, AVATAR_H + 0.22, p.y).project(camera);
+      tmpV.set(p.x, (p.obj?.userData.tall || AVATAR_H) + 0.22, p.y).project(camera);
       const x = ((tmpV.x + 1) / 2) * W, y = ((1 - tmpV.y) / 2) * H, w = c.measureText(p.name).width + 20 * k, h = 22 * k;
       c.fillStyle = 'rgba(23,26,51,.72)'; c.beginPath(); c.roundRect(x - w / 2, y - h / 2, w, h, h / 2); c.fill();
       c.fillStyle = '#fff'; c.fillText(p.name, x, y + k);
@@ -1916,26 +1930,54 @@ function pushProfile() {
   clearTimeout(profileTimer);
   profileTimer = setTimeout(() => send({ t: 'profile', name: draft.name, avatar: draft.avatar }), 350);
 }
+// 角色選項。三種列:色票(固定選項)、hex(預設色 + 自己挑顏色)、range(滑桿)
+const HAIR_PRESETS = ['#3a3040', '#7a5238', '#c58a4a', '#f2cf7a', '#f29ab0', '#8ea4ee', '#eeeaf4'];
+const EYE_PRESETS = ['#6a4630', '#3f6fb5', '#3f9d6b', '#8a5fc9', '#d0586a', '#e0a23a', '#7f8794'];
+const TOP_PRESETS = ['#f08d94', '#ffc98a', '#9ed59a', '#7cc3d6', '#8c9cea', '#c09ae0', '#fbf6ec', '#56506e'];
+const BOTTOM_PRESETS = ['#3b3a4a', '#5d5f86', '#8a6f5a', '#f3ede2', '#7fa2e6', '#e7a3b4', '#9fc7a3'];
 function buildAvatarOptions() {
-  const rows = [
-    ['膚色', 'skin', SKIN.map((c, i) => (i ? { color: c } : { text: '原色' }))],
-    ['造型', 'hair', LOOK_NAMES.map((n) => ({ text: n }))],
-    ['髮色', 'hairColor', HAIRC.map((c) => (c ? { color: c } : { text: '原色' }))],
-    ['上衣', 'shirt', SHIRT.map((c) => (c ? { color: c } : { text: '原色' }))],
-    ['頭飾', 'acc', ACCS.map((k) => ({ text: k ? k.name : '無' }))],
-    ['眼鏡', 'glasses', [{ text: '不戴' }, { text: '戴上' }]],
-    ['頭飾顏色', 'accColor', FABRICS.map((c) => (c ? { color: c } : { text: '原色' }))],
-  ];
-  $('#avatarOptions').replaceChildren(...rows.flatMap(([title, key, opts]) => [
-    el('h3', { textContent: title }),
-    el('div', { className: 'swatches' }, ...opts.map((o, i) => {
-      const b = el('button', { type: 'button', className: (draft.avatar[key] || 0) === i ? 'on' : '', textContent: o.text || '', title: o.text || `${title} ${i + 1}` });
-      if (o.color) b.style.background = o.color; else b.classList.add('txt');
-      b.onclick = () => { draft.avatar[key] = i; buildAvatarOptions(); pushProfile(); };
+  const a = draft.avatar, set = (patch) => { Object.assign(a, patch); buildAvatarOptions(); pushProfile(); };
+  const pick = (title, key, opts) => [el('h3', { textContent: title }), el('div', { className: 'swatches' }, ...opts.map((o, i) => {
+    const b = el('button', { type: 'button', className: (a[key] || 0) === i ? 'on' : '', textContent: o.text || '', title: o.text || `${title} ${i + 1}` });
+    if (o.color) b.style.background = o.color; else b.classList.add('txt');
+    b.onclick = () => set({ [key]: i });
+    return b;
+  }))];
+  const hex = (title, key, legacy, presets) => {
+    const cur = a[key] || '', custom = cur && !presets.includes(cur);
+    const none = el('button', { type: 'button', className: 'txt' + (!cur && !(legacy && a[legacy]) ? ' on' : ''), textContent: '原色' });
+    none.onclick = () => set({ [key]: '', ...(legacy ? { [legacy]: 0 } : {}) });
+    const inp = el('input', { type: 'color', value: cur || presets[0], title: '自己挑顏色', ariaLabel: `${title}:自己挑顏色`, className: custom ? 'on' : '' });
+    inp.onchange = () => set({ [key]: inp.value.toLowerCase(), ...(legacy ? { [legacy]: 0 } : {}) });
+    return [el('h3', { textContent: title }), el('div', { className: 'swatches' }, none, ...presets.map((c) => {
+      const b = el('button', { type: 'button', className: cur === c ? 'on' : '', title: c });
+      b.style.background = c;
+      b.onclick = () => set({ [key]: c, ...(legacy ? { [legacy]: 0 } : {}) });
       return b;
-    })),
-  ]));
-  renderAvatarPreview();
+    }), inp)];
+  };
+  const range = (title, key, def, fmt) => {
+    const val = a[key] ?? def, out = el('span', { textContent: fmt(val) });
+    const inp = el('input', { type: 'range', min: 0, max: 8, step: 1, value: val, ariaLabel: title });
+    inp.oninput = () => { out.textContent = fmt(+inp.value); };
+    inp.onchange = () => set({ [key]: +inp.value });
+    return [el('h3', { textContent: title }), el('div', { className: 'slider' }, inp, out)];
+  };
+  $('#avatarOptions').replaceChildren(
+    ...pick('造型', 'hair', LOOK_NAMES.map((n) => ({ text: n }))),
+    ...range('頭的大小', 'headSize', 0, (v) => (v ? `${100 + v * 6}%` : '原本')),
+    ...range('身高', 'height', 4, (v) => (v === 4 ? '原本' : `${Math.round((0.9 + v * 0.025) * 100)}%`)),
+    ...pick('表情', 'face', [{ text: '自然' }, { text: '微笑' }, { text: '放鬆' }]),
+    ...pick('膚色', 'skin', SKIN.map((c, i) => (i ? { color: c } : { text: '原色' }))),
+    ...hex('髮色', 'hairHex', 'hairColor', HAIR_PRESETS),
+    ...hex('瞳色', 'eyeHex', null, EYE_PRESETS),
+    ...hex('上衣', 'topHex', 'shirt', TOP_PRESETS),
+    ...hex('下身(褲子或裙子)', 'bottomHex', null, BOTTOM_PRESETS),
+    ...pick('頭飾', 'acc', ACCS.map((k) => ({ text: k ? k.name : '無' }))),
+    ...pick('眼鏡', 'glasses', [{ text: '不戴' }, { text: '戴上' }]),
+    ...pick('頭飾顏色', 'accColor', FABRICS.map((c) => (c ? { color: c } : { text: '原色' }))),
+  );
+  clearTimeout(previewTimer); previewTimer = setTimeout(renderAvatarPreview, 220); // 連續調整時只重建一次
 }
 $('#nameInput').addEventListener('input', (ev) => {
   const v = ev.target.value.trim();

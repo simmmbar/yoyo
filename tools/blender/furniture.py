@@ -782,16 +782,27 @@ def plant_big():
 
 
 def plant():
-    """中型盆栽,高約 0.75:白色圓盆 + 一叢圓葉。"""
+    """中型盆栽,高約 0.8:白色圓盆 + 三圈往外展開的長葉片。"""
     m = Model('plant')
     m.cyl(0.13, 0.16, 0.26, (0, 0, 0.13), 'white', segs=24, bevel=0.03)
     m.cyl(0.145, 0.145, 0.012, (0, 0, 0.255), 'soil', segs=24, outline=False)
     rnd = random.Random(8)
-    for i in range(13):
-        a = i * 2.4
-        r = 0.05 + 0.12 * ((i * 7) % 10) / 10
-        h = 0.36 + ((i * 3) % 7) / 7 * 0.3
-        m.ball(0.1 + rnd.uniform(-0.02, 0.02), (math.cos(a) * r, math.sin(a) * r, h), 'plant', scale=(1, 1, 0.9))
+    for ring, (n, out, tilt, length, z) in enumerate(((7, 0.13, 0.95, 1.9, 0.36), (6, 0.085, 0.6, 2.2, 0.45), (4, 0.035, 0.25, 2.4, 0.52))):
+        for i in range(n):
+            a = i * 2 * math.pi / n + ring * 0.5 + rnd.uniform(-0.12, 0.12)
+            m.ball(0.085, (math.cos(a) * out, math.sin(a) * out, z + rnd.uniform(-0.02, 0.02)), 'plant',
+                   scale=(0.55, 0.16, length + rnd.uniform(-0.2, 0.2)), rot=(-math.sin(a) * tilt, math.cos(a) * tilt, a + math.pi / 2))
+    return m
+
+
+def pendant():
+    """天花板吊燈:原點在天花板上的吊點,往下垂。燈罩的亮度由遊戲端依時段調整。"""
+    m = Model('pendant')
+    m.cyl(0.06, 0.06, 0.02, (0, 0, -0.01), 'white', segs=20, bevel=0.005)
+    m.cyl(0.006, 0.006, 0.42, (0, 0, -0.22), 'dark', segs=8, outline=False)
+    m.cyl(0.05, 0.03, 0.05, (0, 0, -0.45), 'brass', segs=16, bevel=0.008)
+    m.cyl(0.3, 0.09, 0.22, (0, 0, -0.58), 'shade', segs=36, bevel=0.01)
+    m.cyl(0.302, 0.302, 0.014, (0, 0, -0.695), 'cream', segs=36, outline=False)
     return m
 
 
@@ -977,7 +988,7 @@ ALL = {
     'bed': lambda: bed('bed', 0.95), 'bed_double': lambda: bed('bed_double', 1.85),
     'sofa': lambda: sofa('sofa', 1.85), 'armchair': lambda: sofa('armchair', 0.92, pillows=False), 'ottoman': ottoman,
     'tv': tv, 'fridge': fridge, 'speaker': speaker, 'arcade': arcade, 'vending': vending,
-    'floorlamp': floorlamp, 'plant_big': plant_big, 'plant': plant, 'bin': bin_, 'cat': cat, 'cat_walk': cat_walk,
+    'floorlamp': floorlamp, 'plant_big': plant_big, 'plant': plant, 'bin': bin_, 'cat': cat, 'cat_walk': cat_walk, 'pendant': pendant,
     'acc_headphones': acc_headphones, 'acc_glasses': acc_glasses, 'acc_catears': acc_catears, 'acc_beret': acc_beret,
     'laptop': laptop, 'books': books, 'plant_small': plant_small, 'succulent': succulent, 'radio': radio, 'teaset': teaset,
 }

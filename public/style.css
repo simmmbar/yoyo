@@ -233,6 +233,16 @@ body.focusing #timerSetup, body.focusing #modes, body.focusing #poses { display:
 .swatches button:not([style]) { width: auto; height: 32px; border-radius: 999px; padding: 0 12px; border-width: 1px; font-size: 13px; }
 .swatches button.txt { width: auto; height: 32px; border-radius: 999px; padding: 0 12px; border-width: 1px; font-size: 13px; }
 .swatches button.txt.on { background: var(--accent); color: var(--accent-ink); border-color: transparent; box-shadow: none; font-weight: 700; }
+.swatches input[type=color] { width: 32px; height: 32px; padding: 0; border-radius: 50%; border: 2px dashed rgba(255, 255, 255, .5); background: conic-gradient(#f08d94, #ffc98a, #9ed59a, #7cc3d6, #8c9cea, #c09ae0, #f08d94); cursor: pointer; overflow: hidden; }
+.swatches input[type=color]::-webkit-color-swatch-wrapper { padding: 0; }
+.swatches input[type=color]::-webkit-color-swatch { border: 0; border-radius: 50%; opacity: 0; }
+.swatches input[type=color]::-moz-color-swatch { border: 0; opacity: 0; }
+.swatches input[type=color].on { border-style: solid; border-color: #fff; box-shadow: 0 0 0 2px var(--accent); }
+.swatches input[type=color].on::-webkit-color-swatch { opacity: 1; }
+.swatches input[type=color].on::-moz-color-swatch { opacity: 1; }
+.slider { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.slider input { flex: 1; padding: 0; accent-color: var(--accent); }
+.slider span { width: 44px; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
 .check { display: flex; gap: 8px; align-items: center; margin-top: 16px; font-size: 14px; }
 .check input { accent-color: var(--accent); }
 

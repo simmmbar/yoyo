@@ -71,7 +71,15 @@ const ALIAS = {
   lamp: 'flamp', flamp2: 'flamp', tree: 'bigplant', tspk: 'radio', obox: 'box', wcab: 'painting', aquarium: 'tv2', bear: 'tplant',
 };
 // acc 頭飾(0 無、1 耳機、2 貓耳、3 貝雷帽)、glasses 眼鏡、accColor 配件顏色
-const AVATAR_RANGES = { skin: 5, hair: 6, hairColor: 7, shirt: 8, acc: 4, glasses: 2, accColor: 8 };
+// headSize 頭的大小(0–8)、height 身高(0–8,4 = 原本)、face 平常的表情
+const AVATAR_RANGES = { skin: 5, hair: 6, hairColor: 7, shirt: 8, acc: 4, glasses: 2, accColor: 8, headSize: 9, height: 9, face: 3 };
+// 自己挑的顏色(#rrggbb,空字串 = 用原本的顏色)
+const AVATAR_HEX = ['hairHex', 'eyeHex', 'topHex', 'bottomHex'];
+function applyAvatar(dst, src) {
+  if (!src || typeof src !== 'object') return;
+  for (const [k, n] of Object.entries(AVATAR_RANGES)) if (Number.isInteger(src[k]) && src[k] >= 0 && src[k] < n) dst[k] = src[k];
+  for (const k of AVATAR_HEX) if (src[k] === '' || (typeof src[k] === 'string' && /^#[0-9a-f]{6}$/i.test(src[k]))) dst[k] = src[k].toLowerCase();
+}
 const POSES = 4; // 專注姿勢:0 打字、1 站著、2 看書、3 寫字
 const MAX_FOCUS_MIN = 180, MAX_TODOS = 30, MAX_HABITS = 8, KEEP_DAYS = 70;
 const PARTY_COUNTDOWN = 20000; // 共同專注發起後,等大家加入的時間
@@ -401,12 +409,7 @@ const handlers = {
     const p = c.profile;
     const name = cleanText(m.name, 16);
     if (name) p.name = name;
-    if (m.avatar && typeof m.avatar === 'object') {
-      for (const [k, n] of Object.entries(AVATAR_RANGES)) {
-        const v = m.avatar[k];
-        if (Number.isInteger(v) && v >= 0 && v < n) p.avatar[k] = v;
-      }
-    }
+    applyAvatar(p.avatar, m.avatar);
     markDirty();
     send(c, { t: 'profile', profile: selfProfile(p) });
     broadcast(c.room, { t: 'pupdate', p: pub(c) });
@@ -547,7 +550,7 @@ const handlers = {
     if (!b || typeof b !== 'object') return;
     const int = (v, max) => clamp(Math.floor(Number(v)) || 0, 0, max);
     p.name = cleanText(b.name, 16) || p.name;
-    if (b.avatar && typeof b.avatar === 'object') for (const [k, n] of Object.entries(AVATAR_RANGES)) if (Number.isInteger(b.avatar[k]) && b.avatar[k] >= 0 && b.avatar[k] < n) p.avatar[k] = b.avatar[k];
+    applyAvatar(p.avatar, b.avatar);
     p.totalMinutes = int(b.totalMinutes, 5e6); p.sessions = int(b.sessions, 5e5);
     p.status = cleanText(b.status, 24); p.pose = Number.isInteger(b.pose) && b.pose >= 0 && b.pose < POSES ? b.pose : 0;
     p.todos = cleanTodos(b.todos); p.habits = cleanHabits(b.habits);
