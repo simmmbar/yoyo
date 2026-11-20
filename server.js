@@ -72,7 +72,7 @@ const ALIAS = {
 };
 // acc 頭飾(0 無、1 耳機、2 貓耳、3 貝雷帽)、glasses 眼鏡、accColor 配件顏色
 // headSize 頭的大小(0–8)、height 身高(0–8,4 = 原本)、face 平常的表情
-const AVATAR_RANGES = { skin: 5, hair: 6, hairColor: 7, shirt: 8, acc: 4, glasses: 2, accColor: 8, headSize: 9, height: 9, face: 3 };
+const AVATAR_RANGES = { skin: 5, hair: 12, hairColor: 7, shirt: 8, acc: 4, glasses: 2, accColor: 8, headSize: 9, height: 9, face: 3 };
 // 自己挑的顏色(#rrggbb,空字串 = 用原本的顏色)
 const AVATAR_HEX = ['hairHex', 'eyeHex', 'topHex', 'bottomHex'];
 function applyAvatar(dst, src) {
@@ -647,7 +647,7 @@ const server = http.createServer((req, res) => {
   if (ad) { hit = [null, 'text/javascript; charset=utf-8']; file = path.join(THREE_DIR, 'examples/jsm', ad[1]); }
   if (url === '/vendor/three-vrm.js') { hit = [null, 'text/javascript; charset=utf-8']; file = path.join(__dirname, 'node_modules/@pixiv/three-vrm/lib/three-vrm.module.min.js'); }
   // 家具(原創)、角色模型(VRoid 範例角色,CC0)、音樂(CC0)
-  const as = /^\/assets\/(studio|avatars|music)\/([\w-]+\.(glb|vrm|txt|mp3))$/.exec(url);
+  const as = /^\/assets\/(studio|avatars|characters|music)\/([\w-]+\.(glb|vrm|txt|mp3))$/.exec(url);
   if (as) {
     const types = { glb: 'model/gltf-binary', vrm: 'application/octet-stream', txt: 'text/plain; charset=utf-8', mp3: 'audio/mpeg' };
     hit = [null, types[as[3]]]; file = path.join(__dirname, 'public/assets', as[1], as[2]);

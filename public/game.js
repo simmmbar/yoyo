@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
+import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
@@ -28,7 +29,7 @@ let COLS = 6, ROWS = 5, CATALOG = {};
 const SKIN = ['#ffffff', '#ffeadb', '#f4cfb2', '#d6a27c', '#a8704e'];
 const HAIRC = [null, '#4a3f52', '#7a5238', '#c58a4a', '#f2cf7a', '#f29ab0', '#8ea4ee'];
 const SHIRT = [null, '#f08d94', '#ffc98a', '#9ed59a', '#7cc3d6', '#8c9cea', '#c09ae0', '#56506e'];
-const LOOK_NAMES = ['女生 A', '男生 A', '女生 B', '男生 B', '女生 C', '女生 D'];
+const LOOK_NAMES = ['女生 A', '男生 A', '女生 B', '男生 B', '女生 C', '女生 D', '積木男 A', '積木女 A', '積木男 B', '積木女 B', '積木男 C', '積木光頭'];
 const WALLS = [['#f6e6d2', '#fffaf0'], ['#d3e3d3', '#f7fbf2'], ['#ddd6f0', '#f8f5ff'], ['#f7d6d2', '#fff6f2'], ['#d2e3f2', '#f5faff'], ['#6a6c9a', '#8f90bd']];
 const FLOORS = [['#e0b081', '#cf9a68'], ['#a9744e', '#96623f'], ['#ecd9bd', '#dfc8a6'], ['#b9bfcc', '#a8aebd'], ['#c6d9c3', '#b3c9b0'], ['#85708a', '#745f79']];
 
@@ -804,7 +805,79 @@ function tintAvatar(vrm, a) {
 }
 
 // 立刻回傳一個空群組,模型載入後再填入
+// ---------- 早期的積木風角色(Quaternius Ultimate Animated Character Pack,CC0),用模型內附的動作 ----------
+const CLASSIC_FILES = ['Casual_Male', 'Casual_Female', 'Casual2_Male', 'Casual2_Female', 'Casual3_Male', 'Casual_Bald'];
+const CLASSIC_SKIN = ['#ffe3d0', '#f8cdaa', '#e6ad84', '#bd8158', '#85573a'];
+const CLASSIC_HAIR = ['#3a3040', '#6b4630', '#b0733c', '#f0c466', '#ee8aa0', '#7f96e8', '#eeeaf4'];
+const CLASSIC_SHIRT = ['#f08d94', '#ffc98a', '#9ed59a', '#7cc3d6', '#8c9cea', '#c09ae0', '#fbf6ec', '#56506e'];
+const CLASSIC_H = 1.62, VROID_TOP = 0.215; // 身高;VROID_TOP = 動漫角色頭頂比頭部骨架高多少(配件是照這個尺寸做的)
+const classicCache = new Map();
+function loadClassic(i) {
+  if (!classicCache.has(i)) classicCache.set(i, new GLTFLoader().loadAsync(`/assets/characters/${CLASSIC_FILES[i]}.glb`).then((gl) => {
+    gl.scene.updateMatrixWorld(true);
+    const bb = new THREE.Box3();
+    gl.scene.traverse((o) => { if (o.isSkinnedMesh) { o.computeBoundingBox(); bb.union(o.boundingBox.clone().applyMatrix4(o.matrixWorld)); } });
+    return { scene: gl.scene, clips: gl.animations, h: bb.max.y - bb.min.y || 1, minY: bb.min.y };
+  }));
+  return classicCache.get(i);
+}
+function buildClassic(a, onReady) {
+  const g = new THREE.Group();
+  g.userData = { ready: false, dead: false };
+  loadClassic(a.hair - 6).then((c) => {
+    if (g.userData.dead) return;
+    const m = cloneSkinned(c.scene), scale = (CLASSIC_H / c.h) * (0.9 + (a.height ?? 4) * 0.025), headK = 1 + (a.headSize || 0) * 0.06;
+    m.scale.setScalar(scale); m.position.y = -c.minY * scale;
+    const tints = { Skin: CLASSIC_SKIN[a.skin] || CLASSIC_SKIN[0], Hair: a.hairHex || CLASSIC_HAIR[a.hairColor] || CLASSIC_HAIR[0], Shirt: a.topHex || CLASSIC_SHIRT[a.shirt] || CLASSIC_SHIRT[0],
+      Pants: a.bottomHex || '#5d5f86', Belt: '#3b3a4a', Face: a.eyeHex || '#3a2f3c' };
+    m.traverse((o) => {
+      if (!o.isMesh) return;
+      o.castShadow = true; o.receiveShadow = false; o.frustumCulled = false;
+      o.material = new THREE.MeshToonMaterial({ color: tints[o.material.name] || o.material.color, gradientMap: toonRamp }); // 和家具同一種卡通打光
+    });
+    g.add(m);
+    g.updateMatrixWorld(true);
+    // 以角色自己為基準算頭的位置(角色這時可能已經站在房間裡、轉了方向,不能直接用世界座標)
+    const head = m.getObjectByName('Head'), headMat = g.matrixWorld.clone().invert().multiply(head.matrixWorld);
+    const headPos = new THREE.Vector3().setFromMatrixPosition(headMat);
+    const topWorld = c.h * scale - headPos.y; // 頭頂比頭部骨架高多少
+    // 配件:在頭部骨架下面放一個「擺正」的掛點(朝前、不歪),大小照頭的高度換算,就能沿用動漫角色的配件
+    const worn = [ACCS[a.acc], a.glasses ? GLASSES : null].filter(Boolean);
+    if (worn.length) {
+      const anchor = new THREE.Object3D(), S = (topWorld / VROID_TOP) * 0.8;
+      anchor.applyMatrix4(new THREE.Matrix4().compose(headPos, new THREE.Quaternion(), new THREE.Vector3(S, S, S)).premultiply(headMat.clone().invert()));
+      head.add(anchor);
+      const wear = () => {
+        if (g.userData.dead) return;
+        for (const acc of worn) {
+          const am = sput(anchor, acc.m, { y: acc.top != null ? VROID_TOP / 0.8 + acc.top : acc === GLASSES ? 0.055 : 0.03, z: acc === GLASSES ? 0.035 : 0, c: a.accColor });
+          am.scale.setScalar(acc.fit ? (VROID_TOP / 0.8 + 0.015) / acc.fit : (acc.scale || 1) * (acc === GLASSES ? 1.45 : 1.05));
+        }
+      };
+      if (modelsLoaded) wear(); else modelsReady.then(wear);
+    }
+    const mixer = new THREE.AnimationMixer(m), act = {};
+    for (const n of ['Idle', 'Walk', 'SitDown', 'Victory']) { const clip = c.clips.find((k) => k.name === n); if (clip) act[n] = mixer.clipAction(clip); }
+    if (act.SitDown) { act.SitDown.loop = THREE.LoopOnce; act.SitDown.clampWhenFinished = true; }
+    act.Idle?.play(); mixer.update(0);
+    g.userData = { ...g.userData, ready: true, classic: true, mixer, act, cur: 'Idle', head, headK, scale, headY: headPos.y, tall: headPos.y + topWorld * headK, sitFwd: 0.12, seat: null };
+    head.scale.setScalar(headK);
+    onReady?.(g);
+  }).catch((e) => console.error('classic avatar load failed', e));
+  return g;
+}
+function poseClassic(g, dt, st) {
+  const u = g.userData;
+  const want = st.walking ? 'Walk' : (st.cheering || st.stretching || st.waving) && u.act.Victory ? 'Victory' : st.sitting && u.act.SitDown ? 'SitDown' : 'Idle';
+  if (want !== u.cur && u.act[want]) { u.act[want].reset().fadeIn(0.2).play(); u.act[u.cur]?.fadeOut(0.2); u.cur = want; }
+  u.mixer.update(dt);
+  u.head.scale.setScalar(u.headK); // 動作會把骨頭的大小寫回去,每格重新套用
+  if (!u.seat && modelsLoaded) u.seat = sput(g, 'stool');
+  if (u.seat) u.seat.visible = u.cur === 'SitDown' && !!st.ownStool;
+}
+
 function buildAvatar(a, onReady) {
+  if (a.hair >= 6) return buildClassic(a, onReady);
   const g = new THREE.Group();
   g.userData = { ready: false, dead: false };
   loadChar(a.hair % CHAR_FILES.length).then((buf) => vrmLoader.parseAsync(buf.slice(0), '')).then((gltf) => {
@@ -859,6 +932,7 @@ const tmpE = new THREE.Euler(), tmpQ = new THREE.Quaternion();
 function poseAvatar(g, dt, st) {
   const u = g.userData;
   if (!u.ready) return;
+  if (u.classic) return poseClassic(g, dt, st);
   const t = (st.t || 0) / 1000 + u.ph, P = {}, sin = Math.sin;
   const arms = (down, fwd, elbow, twist, spread = 0) => {
     P.leftUpperArm = [-fwd, 0, -down]; P.rightUpperArm = [-fwd, 0, down];
@@ -1106,6 +1180,9 @@ function rebuildRoom() {
   }
   for (const l of lampLights) l.intensity = lampLevel() * l.userData.k;
   for (const id of catState.keys()) if (!room.items.some((q) => q.id === id && q.type === 'cat')) catState.delete(id);
+  itemsGroup.updateMatrixWorld(true);
+  camBlocks = itemsGroup.children.filter((g) => { const it = room.items.find((q) => q.id === g.userData.itemId); return it && CATALOG[it.type].kind === 'floor' && it.type !== 'cat'; })
+    .map((g) => new THREE.Box3().setFromObject(g)).filter((bx) => bx.max.y > 0.9); // 矮的家具鏡頭看得過去,不用管
   syncGhost();
 }
 
@@ -1205,7 +1282,8 @@ function setView(name) {
   applyView(view === 'auto' ? AUTO[autoIdx % AUTO.length] : view);
 }
 $('#views').addEventListener('click', (ev) => { const b = ev.target.closest('button'); if (b) setView(b.dataset.view); });
-const camDir = new THREE.Vector3();
+const camDir = new THREE.Vector3(), camRay = new THREE.Ray(), camHit = new THREE.Vector3();
+let camBlocks = []; // 會擋住鏡頭的家具外框(每次重建房間時更新)
 let wasSeated = false;
 function updateCamera(dt, t) {
   if (view === 'auto' && t - autoAt > 14000) { autoAt = t; applyView(AUTO[++autoIdx % AUTO.length]); }
@@ -1222,6 +1300,12 @@ function updateCamera(dt, t) {
   let d = cam.dist;
   const lim = (p, v, lo, hi) => { if (v > 1e-4) d = Math.min(d, (hi - p) / v); else if (v < -1e-4) d = Math.min(d, (lo - p) / v); };
   lim(T.x, camDir.x, m, COLS - m); lim(T.y, camDir.y, 0.25, WALLH - 0.2); lim(T.z, camDir.z, m, ROWS - m);
+  // 角色和鏡頭之間有家具(書櫃、立燈、冰箱…)時,把鏡頭拉到家具前面,才不會鑽進家具裡或被擋住
+  camRay.origin.copy(T); camRay.direction.copy(camDir);
+  for (const bx of camBlocks) {
+    if (bx.containsPoint(T)) continue; // 目標本身就在這件家具的範圍裡(例如坐著的椅子)
+    if (camRay.intersectBox(bx, camHit)) { const hd = camHit.distanceTo(T); if (hd < d) d = Math.max(0.9, hd - 0.15); }
+  }
   camera.position.copy(T).addScaledVector(camDir, Math.max(0.4, d));
   camera.lookAt(T);
   camera.updateMatrixWorld();
@@ -1268,9 +1352,9 @@ function renderAvatarPreview() {
       const cv = $('#avatarPreview'), c2 = cv.getContext('2d');
       thumbScene.add(g);
       // 半身:臉和配件看得清楚,上衣顏色也看得到
-      const cy = g.userData.tall - 0.5; // 以頭頂的高度為準,高矮、頭大頭小都框得到臉
+      const cy = g.userData.tall - 0.45; // 以頭頂的高度為準,高矮、頭大頭小都框得到臉
       thumbCam.position.set(0, cy, 0).addScaledVector(FRONT_DIR, 20); thumbCam.lookAt(0, cy, 0);
-      Object.assign(thumbCam, { left: -0.55, right: 0.55, top: 0.55, bottom: -0.55 }); thumbCam.updateProjectionMatrix();
+      Object.assign(thumbCam, { left: -0.62, right: 0.62, top: 0.62, bottom: -0.62 }); thumbCam.updateProjectionMatrix();
       thumb.render(thumbScene, thumbCam); thumbScene.remove(g);
       c2.clearRect(0, 0, cv.width, cv.height); c2.drawImage(thumb.domElement, 0, 0, cv.width, cv.height);
     }
@@ -1375,7 +1459,7 @@ function frame(t) {
     p.obj.rotation.y += diff * Math.min(1, dt * 12);
     p.heading = p.obj.rotation.y;
     if (p.stretchPending && !walking && !sitting) { p.stretchPending = false; p.stretchUntil = t + 4200; }
-    const fwd = sitting && p.seat ? p.seat.fwd : 0;
+    const fwd = sitting && p.seat ? p.seat.fwd + (p.obj.userData.sitFwd || 0) : 0;
     p.sit = (p.sit || 0) + (fwd - (p.sit || 0)) * Math.min(1, dt * 8);
     p.obj.position.set(p.x + Math.sin(p.obj.rotation.y) * p.sit, 0, p.y + Math.cos(p.obj.rotation.y) * p.sit);
     poseAvatar(p.obj, dt, { walking, sitting, pose: p.pose, waving: p.waveUntil > t, happy: p.happyUntil > t, stretching: p.stretchUntil > t, noDesk: !p.seat || p.seat.desk == null, cheering: p.cheerUntil > t, seatH: p.seat?.h, ownStool: !p.seat, t });
