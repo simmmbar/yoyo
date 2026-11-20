@@ -240,6 +240,7 @@ body.focusing #timerSetup, body.focusing #modes, body.focusing #poses { display:
 .swatches input[type=color].on { border-style: solid; border-color: #fff; box-shadow: 0 0 0 2px var(--accent); }
 .swatches input[type=color].on::-webkit-color-swatch { opacity: 1; }
 .swatches input[type=color].on::-moz-color-swatch { opacity: 1; }
+#avatarTabs { margin-top: 12px; }
 .slider { display: flex; align-items: center; gap: 10px; font-size: 13px; }
 .slider input { flex: 1; padding: 0; accent-color: var(--accent); }
 .slider span { width: 44px; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }

@@ -358,7 +358,8 @@ const ITEMS = {
 };
 // 角色配件:掛在頭部骨架上。top = 以頭頂(含頭髮)為基準往上放
 // 頭飾:fit = 模型原本的頭帶高度,會依角色的頭髮高度等比例放大,耳機才套得在頭髮外面;top = 以頭頂(含頭髮)為基準
-const ACCS = [null, { m: 'acc_headphones', name: '耳機', fit: 0.183 }, { m: 'acc_catears', name: '貓耳', top: -0.07, scale: 1.4 }, { m: 'acc_beret', name: '貝雷帽', top: -0.032, scale: 1.08 }];
+const ACCS = [null, { m: 'acc_headphones', name: '耳機', fit: 0.183 }, { m: 'acc_catears', name: '貓耳', top: -0.07, scale: 1.4 }, { m: 'acc_beret', name: '貝雷帽', top: -0.032, scale: 1.08 },
+  { m: 'acc_bow', name: '蝴蝶結', top: -0.035, scale: 1.0 }, { m: 'acc_crown', name: '小皇冠', top: -0.02, scale: 1.1 }, { m: 'acc_flower', name: '花', top: -0.03, scale: 1.25 }];
 const GLASSES = { m: 'acc_glasses' };
 const SFILES = [...new Set(Object.values(ITEMS).map((k) => k.m)), 'door', 'cat_walk', 'pendant', ...ACCS.filter(Boolean).map((k) => k.m), GLASSES.m];
 const MODEL = {}, SBB = {}, STINT = {}; // 模型、外框、可否換色
@@ -1366,8 +1367,14 @@ function renderAvatarPreview() {
 function syncPlayerObj(p) {
   const key = JSON.stringify(p.avatar);
   if (p.key !== key) {
-    if (p.obj) { playersGroup.remove(p.obj); disposeAvatar(p.obj); }
-    p.obj = buildAvatar(p.avatar); p.key = key;
+    // 換造型時,舊的樣子先留在畫面上,新的載好才替換,角色不會消失一下
+    if (p.obj && p.obj !== p.shown) { playersGroup.remove(p.obj); disposeAvatar(p.obj); } // 還沒載完就又被換掉的那一個
+    const next = buildAvatar(p.avatar, () => {
+      if (p.obj !== next) return; // 已經被更新的選擇取代
+      if (p.shown && p.shown !== next) { playersGroup.remove(p.shown); disposeAvatar(p.shown); }
+      p.shown = next;
+    });
+    p.obj = next; p.key = key;
     p.obj.rotation.y = p.heading ?? Math.PI / 4;
     playersGroup.add(p.obj);
   }
@@ -1385,7 +1392,7 @@ function syncPlayerObj(p) {
 function removePlayer(id) {
   const p = players.get(id);
   if (!p) return;
-  if (p.obj) { playersGroup.remove(p.obj); disposeAvatar(p.obj); }
+  for (const o of new Set([p.obj, p.shown])) if (o) { playersGroup.remove(o); disposeAvatar(o); }
   p.el?.remove();
   players.delete(id);
 }
@@ -1462,6 +1469,7 @@ function frame(t) {
     const fwd = sitting && p.seat ? p.seat.fwd + (p.obj.userData.sitFwd || 0) : 0;
     p.sit = (p.sit || 0) + (fwd - (p.sit || 0)) * Math.min(1, dt * 8);
     p.obj.position.set(p.x + Math.sin(p.obj.rotation.y) * p.sit, 0, p.y + Math.cos(p.obj.rotation.y) * p.sit);
+    if (p.shown && p.shown !== p.obj) { p.shown.position.copy(p.obj.position); p.shown.rotation.y = p.obj.rotation.y; } // 等新造型載入時,舊的跟著移動
     poseAvatar(p.obj, dt, { walking, sitting, pose: p.pose, waving: p.waveUntil > t, happy: p.happyUntil > t, stretching: p.stretchUntil > t, noDesk: !p.seat || p.seat.desk == null, cheering: p.cheerUntil > t, seatH: p.seat?.h, ownStool: !p.seat, t });
     const tall = p.obj.userData.tall || AVATAR_H; // 名字標籤跟著角色的實際高度
     p.labelY = (p.labelY || tall) + ((sitting ? tall - 0.36 : tall) - (p.labelY || tall)) * Math.min(1, dt * 6);
@@ -2019,6 +2027,7 @@ const HAIR_PRESETS = ['#3a3040', '#7a5238', '#c58a4a', '#f2cf7a', '#f29ab0', '#8
 const EYE_PRESETS = ['#6a4630', '#3f6fb5', '#3f9d6b', '#8a5fc9', '#d0586a', '#e0a23a', '#7f8794'];
 const TOP_PRESETS = ['#f08d94', '#ffc98a', '#9ed59a', '#7cc3d6', '#8c9cea', '#c09ae0', '#fbf6ec', '#56506e'];
 const BOTTOM_PRESETS = ['#3b3a4a', '#5d5f86', '#8a6f5a', '#f3ede2', '#7fa2e6', '#e7a3b4', '#9fc7a3'];
+let avatarGroup = 'look'; // 角色面板目前在哪一頁:外型 / 顏色 / 配件
 function buildAvatarOptions() {
   const a = draft.avatar, set = (patch) => { Object.assign(a, patch); buildAvatarOptions(); pushProfile(); };
   const pick = (title, key, opts) => [el('h3', { textContent: title }), el('div', { className: 'swatches' }, ...opts.map((o, i) => {
@@ -2047,20 +2056,32 @@ function buildAvatarOptions() {
     inp.onchange = () => set({ [key]: +inp.value });
     return [el('h3', { textContent: title }), el('div', { className: 'slider' }, inp, out)];
   };
-  $('#avatarOptions').replaceChildren(
-    ...pick('造型', 'hair', LOOK_NAMES.map((n) => ({ text: n }))),
-    ...range('頭的大小', 'headSize', 0, (v) => (v ? `${100 + v * 6}%` : '原本')),
-    ...range('身高', 'height', 4, (v) => (v === 4 ? '原本' : `${Math.round((0.9 + v * 0.025) * 100)}%`)),
-    ...pick('表情', 'face', [{ text: '自然' }, { text: '微笑' }, { text: '放鬆' }]),
-    ...pick('膚色', 'skin', SKIN.map((c, i) => (i ? { color: c } : { text: '原色' }))),
-    ...hex('髮色', 'hairHex', 'hairColor', HAIR_PRESETS),
-    ...hex('瞳色', 'eyeHex', null, EYE_PRESETS),
-    ...hex('上衣', 'topHex', 'shirt', TOP_PRESETS),
-    ...hex('下身(褲子或裙子)', 'bottomHex', null, BOTTOM_PRESETS),
-    ...pick('頭飾', 'acc', ACCS.map((k) => ({ text: k ? k.name : '無' }))),
-    ...pick('眼鏡', 'glasses', [{ text: '不戴' }, { text: '戴上' }]),
-    ...pick('頭飾顏色', 'accColor', FABRICS.map((c) => (c ? { color: c } : { text: '原色' }))),
-  );
+  const groups = {
+    look: () => [
+      ...pick('造型', 'hair', LOOK_NAMES.map((n) => ({ text: n }))),
+      ...range('頭的大小', 'headSize', 0, (v) => (v ? `${100 + v * 6}%` : '原本')),
+      ...range('身高', 'height', 4, (v) => (v === 4 ? '原本' : `${Math.round((0.9 + v * 0.025) * 100)}%`)),
+      ...pick('表情', 'face', [{ text: '自然' }, { text: '微笑' }, { text: '放鬆' }]),
+    ],
+    color: () => [
+      ...pick('膚色', 'skin', SKIN.map((c, i) => (i ? { color: c } : { text: '原色' }))),
+      ...hex('髮色', 'hairHex', 'hairColor', HAIR_PRESETS),
+      ...hex('瞳色', 'eyeHex', null, EYE_PRESETS),
+      ...hex('上衣', 'topHex', 'shirt', TOP_PRESETS),
+      ...hex('下身(褲子或裙子)', 'bottomHex', null, BOTTOM_PRESETS),
+    ],
+    acc: () => [
+      ...pick('頭飾', 'acc', ACCS.map((k) => ({ text: k ? k.name : '無' }))),
+      ...pick('頭飾顏色', 'accColor', FABRICS.map((c) => (c ? { color: c } : { text: '原色' }))),
+      ...pick('眼鏡', 'glasses', [{ text: '不戴' }, { text: '戴上' }]),
+    ],
+  };
+  const tabs = el('div', { className: 'seg small', id: 'avatarTabs' }, ...[['look', '外型'], ['color', '顏色'], ['acc', '配件']].map(([k, name]) => {
+    const b = el('button', { type: 'button', className: avatarGroup === k ? 'on' : '', textContent: name });
+    b.onclick = () => { avatarGroup = k; buildAvatarOptions(); };
+    return b;
+  }));
+  $('#avatarOptions').replaceChildren(tabs, ...groups[avatarGroup]());
   clearTimeout(previewTimer); previewTimer = setTimeout(renderAvatarPreview, 220); // 連續調整時只重建一次
 }
 $('#nameInput').addEventListener('input', (ev) => {

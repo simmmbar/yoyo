@@ -898,6 +898,40 @@ def acc_beret():
     return m
 
 
+def acc_bow():
+    """蝴蝶結:兩片往外翹的扁蝶翼、中間的結、兩條垂下來的緞帶。原點在頭頂。"""
+    m = Model('acc_bow')
+    for sx in (-1, 1):
+        m.box((0.078, 0.02, 0.07), (sx * 0.05, 0.0, 0.036), 'fabric', bevel=0.014, seg=3, rot=(0, -sx * 0.3, 0))    # 扁平的蝶翼,往外往上翹
+        m.box((0.03, 0.022, 0.03), (sx * 0.018, -0.001, 0.03), 'fabric', bevel=0.008, outline=False)                 # 靠近結的地方收窄
+        m.box((0.02, 0.012, 0.075), (sx * 0.022, 0.014, -0.02), 'fabric', bevel=0.004, rot=(0, sx * 0.4, 0), outline=False)
+    m.ball(0.02, (0, -0.004, 0.028), 'fabric', scale=(0.9, 1.0, 1.1))
+    return m
+
+
+def acc_crown():
+    """小皇冠:金色的環、五個尖角、尖端各一顆珠子,戴在頭頂偏一邊。"""
+    m = Model('acc_crown')
+    m.cyl(0.05, 0.055, 0.03, (0, 0, 0.015), 'brass', segs=20, bevel=0.004)
+    for i in range(5):
+        a = i * 2 * math.pi / 5 + math.pi / 2
+        x, y = math.cos(a) * 0.045, math.sin(a) * 0.045
+        m.cyl(0.018, 0.002, 0.045, (x, y, 0.05), 'brass', segs=8)
+        m.ball(0.008, (x, y, 0.075), 'pink', outline=False)
+    return m
+
+
+def acc_flower():
+    """別在頭側的花:五片花瓣加花蕊。"""
+    m = Model('acc_flower')
+    cx, cy, cz = 0.085, -0.05, -0.03
+    for i in range(5):
+        a = i * 2 * math.pi / 5 + 0.3
+        m.ball(0.024, (cx + math.cos(a) * 0.026, cy, cz + math.sin(a) * 0.026), 'fabric', scale=(1, 0.45, 1), outline=(i % 2 == 0))
+    m.ball(0.014, (cx, cy - 0.008, cz), 'brass', scale=(1, 0.6, 1), outline=False)
+    return m
+
+
 # ---------------- 桌上小物 ----------------
 
 def laptop():
@@ -989,7 +1023,7 @@ ALL = {
     'sofa': lambda: sofa('sofa', 1.85), 'armchair': lambda: sofa('armchair', 0.92, pillows=False), 'ottoman': ottoman,
     'tv': tv, 'fridge': fridge, 'speaker': speaker, 'arcade': arcade, 'vending': vending,
     'floorlamp': floorlamp, 'plant_big': plant_big, 'plant': plant, 'bin': bin_, 'cat': cat, 'cat_walk': cat_walk, 'pendant': pendant,
-    'acc_headphones': acc_headphones, 'acc_glasses': acc_glasses, 'acc_catears': acc_catears, 'acc_beret': acc_beret,
+    'acc_headphones': acc_headphones, 'acc_glasses': acc_glasses, 'acc_catears': acc_catears, 'acc_beret': acc_beret, 'acc_bow': acc_bow, 'acc_crown': acc_crown, 'acc_flower': acc_flower,
     'laptop': laptop, 'books': books, 'plant_small': plant_small, 'succulent': succulent, 'radio': radio, 'teaset': teaset,
 }
 

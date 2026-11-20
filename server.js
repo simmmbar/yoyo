@@ -70,9 +70,9 @@ const ALIAS = {
   bookshelf: 'widecase', sofa: 'ksofa', dsofa: 'ksofa', armchair: 'lchair', bunk: 'bed', tv: 'tv2', claw: 'arcade', pinball: 'arcade',
   lamp: 'flamp', flamp2: 'flamp', tree: 'bigplant', tspk: 'radio', obox: 'box', wcab: 'painting', aquarium: 'tv2', bear: 'tplant',
 };
-// acc 頭飾(0 無、1 耳機、2 貓耳、3 貝雷帽)、glasses 眼鏡、accColor 配件顏色
+// acc 頭飾(0 無、1 耳機、2 貓耳、3 貝雷帽、4 蝴蝶結、5 小皇冠、6 花)、glasses 眼鏡、accColor 配件顏色
 // headSize 頭的大小(0–8)、height 身高(0–8,4 = 原本)、face 平常的表情
-const AVATAR_RANGES = { skin: 5, hair: 12, hairColor: 7, shirt: 8, acc: 4, glasses: 2, accColor: 8, headSize: 9, height: 9, face: 3 };
+const AVATAR_RANGES = { skin: 5, hair: 12, hairColor: 7, shirt: 8, acc: 7, glasses: 2, accColor: 8, headSize: 9, height: 9, face: 3 };
 // 自己挑的顏色(#rrggbb,空字串 = 用原本的顏色)
 const AVATAR_HEX = ['hairHex', 'eyeHex', 'topHex', 'bottomHex'];
 function applyAvatar(dst, src) {
