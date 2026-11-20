@@ -347,6 +347,7 @@ body.focusing #timerSetup, body.focusing #modes, body.focusing #poses { display:
 #trackList li span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #trackList li span:last-child { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; flex: none; font-weight: 400; }
 #player { display: flex; flex-direction: column; gap: 8px; }
+#addMusic { font-size: 12px; border-radius: 999px; padding: 4px 10px; color: var(--muted); align-self: flex-start; }
 .subHead { font-size: 12px; color: var(--muted); font-weight: 600; letter-spacing: .12em; margin-top: 4px; }
 
 /* 第一次進來的操作提示 */

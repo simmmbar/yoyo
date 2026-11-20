@@ -11,7 +11,7 @@ const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 const COLS = 6, ROWS = 5, MAX_ITEMS = 110, MAX_ROOM_PLAYERS = 12;
 
 // kind: floor(佔地板格) / rug(鋪在地上,可被踩與疊放) / wall(掛在牆上) / top(小物:放在桌面、櫃子上,或直接放地上)
-// g: 佈置面板的分類
+// g: 佈置面板的分類。小物只佔半格見方,位置以四分之一格為單位,同一張桌子可以擺好幾件
 const CATALOG = {
   kdesk:    { name: '工作桌',   w: 2, h: 1, g: 'desk', kind: 'floor' },
   dining:   { name: '長桌',     w: 2, h: 1, g: 'desk', kind: 'floor' },
@@ -42,13 +42,13 @@ const CATALOG = {
   bin:      { name: '垃圾桶',   w: 1, h: 1, g: 'deco', kind: 'floor' },
   cat:      { name: '貓咪',     w: 1, h: 1, g: 'deco', kind: 'floor' },
   monitor:  { name: '螢幕鍵盤', w: 1, h: 1, g: 'top', kind: 'top' },
-  tlaptop:  { name: '筆電',     w: 1, h: 1, g: 'top', kind: 'top' },
-  tlamp:    { name: '檯燈',     w: 1, h: 1, g: 'top', kind: 'top' },
-  tbooks:   { name: '書堆',     w: 1, h: 1, g: 'top', kind: 'top' },
-  tplant:   { name: '小盆栽',   w: 1, h: 1, g: 'top', kind: 'top' },
-  tplant2:  { name: '多肉盆栽', w: 1, h: 1, g: 'top', kind: 'top' },
-  radio:    { name: '收音機',   w: 1, h: 1, g: 'top', kind: 'top' },
-  brew:     { name: '茶具組',   w: 1, h: 1, g: 'top', kind: 'top' },
+  tlaptop:  { name: '筆電',     w: 0.5, h: 0.5, g: 'top', kind: 'top' },
+  tlamp:    { name: '檯燈',     w: 0.5, h: 0.5, g: 'top', kind: 'top' },
+  tbooks:   { name: '書堆',     w: 0.5, h: 0.5, g: 'top', kind: 'top' },
+  tplant:   { name: '小盆栽',   w: 0.5, h: 0.5, g: 'top', kind: 'top' },
+  tplant2:  { name: '多肉盆栽', w: 0.5, h: 0.5, g: 'top', kind: 'top' },
+  radio:    { name: '收音機',   w: 0.5, h: 0.5, g: 'top', kind: 'top' },
+  brew:     { name: '茶具組',   w: 0.5, h: 0.5, g: 'top', kind: 'top' },
   window:   { name: '窗戶',     w: 2, h: 1, g: 'wall', kind: 'wall' },
   painting: { name: '掛畫',     w: 1, h: 1, g: 'wall', kind: 'wall' },
   poster:   { name: '海報',     w: 1, h: 1, g: 'wall', kind: 'wall' },
@@ -90,6 +90,8 @@ const rooms = loadJson('rooms.json');       // code -> room
 for (const r of Object.values(rooms)) for (const it of r.items || []) if (ALIAS[it.type]) { it.type = ALIAS[it.type]; delete it.c; }
 // 舊存檔相容:房間從 8×6 縮成 6×5,放不下的舊房間換成預設書房(在 PRESETS 定義之後執行)
 const migrateRooms = () => { for (const r of Object.values(rooms)) if ((r.items || []).some((it) => !CATALOG[it.type] || it.x + dims(it.type, it.r)[0] > COLS || (CATALOG[it.type].kind !== 'wall' && it.y + dims(it.type, it.r)[1] > ROWS))) { r.items = presetItems('study'); r.nextId = r.items.length + 1; markDirty(); } };
+// 舊存檔相容:小物原本佔一整格、擺在格子正中央;改成半格之後往右下移四分之一格,看起來才會在原位
+for (const r of Object.values(rooms)) if (r.v !== 2) { for (const it of r.items || []) if (CATALOG[it.type]?.kind === 'top' && CATALOG[it.type].w < 1) { it.x += 0.25; it.y += 0.25; } r.v = 2; }
 // 舊存檔相容:眼鏡原本是頭飾的其中一個選項(2),現在獨立出來,可以和頭飾一起戴
 for (const p of Object.values(profiles)) if (p.avatar && p.avatar.glasses === undefined) { const a = p.avatar; a.glasses = a.acc === 2 ? 1 : 0; a.acc = { 1: 1, 3: 2, 4: 3 }[a.acc] || 0; a.accColor = 0; }
 // 舊存檔相容:舊版的專注紀錄沒有模式欄位,直接清掉
@@ -124,7 +126,9 @@ const rotOf = (r) => (Number.isInteger(r) ? ((r % 4) + 4) % 4 : 0);
 const dims = (type, r) => { const d = CATALOG[type]; return d.kind !== 'wall' && rotOf(r) % 2 ? [d.h, d.w] : [d.w, d.h]; };
 function canPlace(items, type, x, y, r, ignoreId) {
   const d = CATALOG[type];
-  if (!d || !Number.isInteger(x) || !Number.isInteger(y)) return false;
+  if (!d || typeof x !== 'number' || typeof y !== 'number') return false;
+  const step = d.kind === 'top' ? 4 : 1; // 小物可以放在四分之一格上
+  if (!Number.isInteger(x * step) || !Number.isInteger(y * step)) return false;
   const [w, h] = dims(type, r);
   if (x < 0 || x + w > COLS) return false;
   if (d.kind === 'wall') { if (y !== 0) return false; }
@@ -144,21 +148,22 @@ const PRESETS = {
   study: { name: '書房', wall: 0, floor: 0, items: [
     ['kcase', 0, 0], ['bigplant', 1, 0], ['kchair', 3, 0], ['lowcase', 4, 0], ['doorcase', 5, 0],
     ['kdesk', 2, 1], ['flamp', 5, 1], ['ksofa', 0, 2, 1, 4], ['coffee', 1, 3], ['widecase', 5, 2, 3], ['side', 0, 4], ['cat', 2, 4],
-    ['tlaptop', 3, 1, 2], ['tlamp', 2, 1, 2], ['radio', 4, 0], ['tbooks', 1, 3], ['tplant2', 2, 3], ['tplant', 0, 4],
+    ['tlaptop', 3.25, 1, 2], ['tlamp', 2, 1, 2], ['tbooks', 2.5, 1.5, 1], ['brew', 3.25, 1.5], ['radio', 4.25, 0],
+    ['tbooks', 1.25, 3.25], ['tplant2', 2.25, 3.25], ['tplant', 0.25, 4],
     ['rbig', 1, 2, 0, 6], ['mat', 4, 4],
     ['window', 2, 0], ['poster', 0, 0], ['painting', 1, 0], ['wlamp', 4, 0], ['clock', 5, 0],
   ] },
   bedroom: { name: '臥室', wall: 2, floor: 2, items: [
     ['dbed', 0, 0, 0, 5], ['side', 2, 0], ['kdesk', 3, 0, 0, 4], ['kcase', 5, 0, 0, 4], ['kchair', 3, 1], ['plant', 4, 1],
     ['lowcase', 5, 2, 3, 4], ['arcade', 5, 3, 3], ['lchair', 0, 2, 1, 5], ['ottoman', 1, 2, 0, 5], ['box', 0, 4], ['bigplant', 5, 4],
-    ['monitor', 3, 0], ['tbooks', 4, 0], ['tlamp', 2, 0], ['radio', 5, 2, 3], ['bin', 1, 4],
+    ['monitor', 3, 0], ['tbooks', 4, 0], ['tplant2', 4.25, 0.5], ['tlamp', 2.25, 0], ['radio', 5.5, 2.25, 3], ['tplant', 5.5, 2.75], ['bin', 1, 4],
     ['rround', 1, 2, 0, 6], ['mat', 4, 4],
     ['window', 0, 0], ['neon', 2, 0], ['shelf', 3, 0], ['clock', 5, 0],
   ] },
   lounge: { name: '客廳', wall: 4, floor: 1, items: [
     ['bigplant', 0, 0], ['kcase', 1, 0, 0, 3], ['kdesk', 2, 0, 0, 3], ['fridge', 4, 0], ['vending', 5, 0], ['kchair', 2, 1], ['flamp', 0, 1],
     ['ksofa', 0, 2, 1, 2], ['coffee', 2, 2, 1, 3], ['tv2', 5, 2, 3, 3], ['arcade', 5, 1, 3], ['side', 0, 4, 0, 3], ['cat', 3, 4], ['spk', 5, 4],
-    ['monitor', 2, 0], ['tbooks', 3, 0], ['tplant2', 2, 2], ['radio', 2, 3, 1], ['tplant', 0, 4],
+    ['monitor', 2, 0], ['tbooks', 3, 0.25], ['tplant2', 2.25, 2.25], ['tbooks', 2.25, 2.75, 1], ['radio', 2.25, 3.25, 1], ['tplant', 0.25, 4],
     ['rbig', 1, 2, 0, 4], ['mat', 4, 4],
     ['window', 2, 0], ['neon', 0, 0], ['clock', 4, 0], ['wlamp', 5, 0], ['painting', 1, 0],
   ] },
@@ -170,7 +175,7 @@ function newRoom(ownerKey) {
   let code;
   do { code = randCode(6); } while (rooms[code]);
   rooms[code] = {
-    code, ownerKey, wall: 0, floor: 0, guestsEdit: false,
+    code, ownerKey, wall: 0, floor: 0, guestsEdit: false, v: 2,
     // 新房間附一組基本佈置(之後可自由移動、收回,或換成別的成品房間)
     items: presetItems('study'), nextId: PRESETS.study.items.length + 1,
   };
@@ -557,7 +562,7 @@ const handlers = {
         if (typeof type !== 'string' || !Object.hasOwn(CATALOG, type) || !canPlace(items, type, raw.x, raw.y, rot)) continue;
         items.push({ id: items.length + 1, type, x: raw.x, y: raw.y, ...(rot && CATALOG[type].kind !== 'wall' ? { r: rot } : {}), ...(colOf(raw.c) ? { c: colOf(raw.c) } : {}) });
       }
-      if (items.length) { r.items = items; r.nextId = items.length + 1; }
+      if (items.length) { r.items = items; r.nextId = items.length + 1; r.v = 2; }
       for (const k of ['wall', 'floor']) if (Number.isInteger(rb[k]) && rb[k] >= 0 && rb[k] < THEME_COUNT) r[k] = rb[k];
       r.guestsEdit = !!rb.guestsEdit;
       // 房號也換回原本的,之前發出去的邀請連結才不會失效(那個房號要還沒被別人用掉)

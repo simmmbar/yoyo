@@ -589,13 +589,20 @@ function buildItem(type, opt) {
 }
 // 可以放小物的檯面高度(沒有就是 0 = 地板)
 const surfTop = (it) => ITEMS[it.type]?.surf || 0;
-function surfAt(x, y) {
+// 家具檯面在房間裡實際佔的範圍(照模型的外框算,不是整格),小物的中心落在裡面才算放在上面
+function surfaceRect(it) {
+  const k = ITEMS[it.type], d = CATALOG[it.type], bb = SBB[k.m], th = rotOf(it.r) * Math.PI / 2, [W, H] = dimsOf(it.type, it.r);
+  const zOff = (k.back ? (bb.max.z - bb.min.z) / 2 + 0.03 : d.h / 2) - d.h / 2;
+  const pt = (mx, mz) => [it.x + W / 2 + mx * Math.cos(th) + (zOff + mz) * Math.sin(th), it.y + H / 2 - mx * Math.sin(th) + (zOff + mz) * Math.cos(th)];
+  const [ax, az] = pt(bb.min.x, bb.min.z), [bx, bz] = pt(bb.max.x, bb.max.z);
+  return [Math.min(ax, bx), Math.max(ax, bx), Math.min(az, bz), Math.max(az, bz)];
+}
+function surfAt(cx, cz) {
   let top = 0;
   for (const it of room.items) {
-    const d = CATALOG[it.type];
-    if (!d || d.kind !== 'floor') continue;
-    const [w, h] = dimsOf(it.type, it.r);
-    if (x >= it.x && x < it.x + w && y >= it.y && y < it.y + h) top = Math.max(top, surfTop(it));
+    if (!surfTop(it) || CATALOG[it.type]?.kind !== 'floor') continue;
+    const [x0, x1, z0, z1] = surfaceRect(it);
+    if (cx >= x0 && cx <= x1 && cz >= z0 && cz <= z1) top = Math.max(top, surfTop(it));
   }
   return top;
 }
@@ -1080,7 +1087,7 @@ function rebuildRoom() {
     if (inner.userData.cat) { anims.push(catAnim(it, inner.userData.cat)); face = 0; } // 貓自己決定面向
     const g = wrapItem(inner, it.type, face);
     itemPos(g, it.type, it.x, it.y);
-    if (CATALOG[it.type].kind === 'top') g.position.y = surfAt(it.x, it.y);
+    if (CATALOG[it.type].kind === 'top') { const [tw, th2] = dimsOf(it.type, it.r); g.position.y = surfAt(it.x + tw / 2, it.y + th2 / 2); }
     g.userData.itemId = it.id;
     itemsGroup.add(g);
   }
@@ -1374,7 +1381,7 @@ function frame(t) {
     ghost.visible = ghostPad.visible = !!hover;
     if (hover) {
       itemPos(ghost, holding.type, hover.x, hover.y);
-      if (d.kind === 'top') ghost.position.y = surfAt(hover.x, hover.y);
+      if (d.kind === 'top') { const [tw, th2] = dimsOf(holding.type, holding.r); ghost.position.y = surfAt(hover.x + tw / 2, hover.y + th2 / 2); }
       const ok = canPlace(holding.type, hover.x, hover.y, holding.r, holding.fromId), [gw, gh] = dimsOf(holding.type, holding.r);
       ghostPad.material.color.set(ok ? '#8fe08a' : '#ff7d88');
       if (d.kind === 'wall') { ghostPad.rotation.set(0, 0, 0); ghostPad.scale.set(d.w, WALLH - 0.25, 1); ghostPad.position.set(hover.x + d.w / 2, WALLH / 2 + 0.125, 0.015); }
@@ -1405,6 +1412,10 @@ function tileAt(pt) { // 拿著家具時,讓家具以游標為中心
   const d = CATALOG[holding.type], [w, h] = dimsOf(holding.type, holding.r);
   if (d.kind === 'wall') return { x: Math.floor(pt.x - (w - 1) / 2), y: 0 };
   if (pt.wall) return null;
+  if (d.kind === 'top') { // 小物:以四分之一格為單位,可以擺得很近
+    const q = (v, size, max) => Math.min(max - size, Math.max(0, Math.round((v - size / 2) * 4) / 4));
+    return { x: q(pt.x, w, COLS), y: q(pt.z, h, ROWS) };
+  }
   return { x: Math.floor(pt.x - (w - 1) / 2), y: Math.floor(pt.z - (h - 1) / 2) };
 }
 // 拖曳 = 轉動鏡頭;沒有移動的點擊 = 走路 / 放家具;滾輪或雙指 = 縮放
@@ -2028,7 +2039,7 @@ const TRACKS = [
   ['tokyo-sunset', 'Tokyo Sunset', 'Public Domain Lofi', 139], ['calm-currents', 'Calm Currents', 'Public Domain Lofi', 148], ['still-life', 'Still Life', 'Public Domain Lofi', 135],
   ['peaceful-drift', 'Peaceful Drift', 'Public Domain Lofi', 128], ['ease-into-night', 'Ease into Night', 'Public Domain Lofi', 152],
   ['roof-tops', 'Roof Tops', 'Summer Air', 214], ['faded-in-the-sunlight', 'Faded in the Sunlight', 'Summer Air', 178],
-].map(([f, t, al, sec]) => ({ f, t, al, sec }));
+].map(([f, t, al, sec]) => ({ t, al, sec, url: `/assets/music/${f}.mp3` }));
 const audio = new Audio();
 audio.preload = 'none';
 let trackIdx = Math.min(TRACKS.length - 1, Math.max(0, +store.get('yoyo_track') || 0)), shuffle = store.get('yoyo_shuffle') === '1', seeking = false, loaded = -1;
@@ -2037,7 +2048,7 @@ $('#mVol').value = Math.round(audio.volume * 100);
 function refreshPlayer() {
   const tr = TRACKS[trackIdx], on = !audio.paused;
   $('#npTitle').textContent = loaded < 0 ? '選一首開始播放' : tr.t;
-  $('#npSub').textContent = loaded < 0 ? `lo-fi 音樂 · ${TRACKS.length} 首` : `HoliznaCC0 · ${tr.al}`;
+  $('#npSub').textContent = loaded < 0 ? `lo-fi 音樂 · ${TRACKS.length} 首` : tr.mine ? '我的音樂' : `HoliznaCC0 · ${tr.al}`;
   $('#musicNow').textContent = on ? `♪ ${tr.t}` : '';
   $('#musicCard').classList.toggle('playing', on); // 收起來時,膠囊上顯示正在播的歌
   $('#mPlayIcon').setAttribute('d', on ? 'M6 4h4v16H6zM14 4h4v16h-4z' : 'M7 4l13 8-13 8z');
@@ -2048,20 +2059,35 @@ function refreshPlayer() {
 function playTrack(i) {
   trackIdx = ((i % TRACKS.length) + TRACKS.length) % TRACKS.length;
   store.set('yoyo_track', trackIdx);
-  if (loaded !== trackIdx) { audio.src = `/assets/music/${TRACKS[trackIdx].f}.mp3`; loaded = trackIdx; $('#mSeek').value = 0; }
+  if (loaded !== trackIdx) { audio.src = TRACKS[trackIdx].url; loaded = trackIdx; $('#mSeek').value = 0; }
   audio.play().catch(() => toast('這首歌暫時無法播放,請再按一次播放'));
-  if ('mediaSession' in navigator) navigator.mediaSession.metadata = new MediaMetadata({ title: TRACKS[trackIdx].t, artist: 'HoliznaCC0', album: TRACKS[trackIdx].al });
+  if ('mediaSession' in navigator) navigator.mediaSession.metadata = new MediaMetadata({ title: TRACKS[trackIdx].t, artist: TRACKS[trackIdx].mine ? '我的音樂' : 'HoliznaCC0', album: TRACKS[trackIdx].al });
   refreshPlayer();
 }
 const nextTrack = () => playTrack(shuffle && TRACKS.length > 1 ? (trackIdx + 1 + Math.floor(Math.random() * (TRACKS.length - 1))) % TRACKS.length : trackIdx + 1);
 const prevTrack = () => (audio.currentTime > 4 ? ((audio.currentTime = 0), audio.play()) : playTrack(trackIdx - 1));
 const togglePlay = () => (loaded < 0 || audio.paused ? playTrack(trackIdx) : audio.pause());
-$('#trackList').replaceChildren(...TRACKS.map((tr, i) => {
-  const li = el('li', { tabIndex: 0, role: 'button' }, el('span', { textContent: tr.t }), el('span', { textContent: mmss(tr.sec) }));
-  li.onclick = () => playTrack(i);
-  li.onkeydown = (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); playTrack(i); } };
-  return li;
-}));
+function renderTracks() {
+  $('#trackList').replaceChildren(...TRACKS.map((tr, i) => {
+    const li = el('li', { tabIndex: 0, role: 'button' }, el('span', { textContent: tr.t }), el('span', { textContent: tr.sec ? mmss(tr.sec) : '我的' }));
+    li.onclick = () => playTrack(i);
+    li.onkeydown = (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); playTrack(i); } };
+    return li;
+  }));
+  refreshPlayer();
+}
+// 加入自己的音樂:檔案只在這台裝置上播放,不會上傳;重新整理後要再加一次
+$('#addMusic').addEventListener('click', () => $('#musicFile').click());
+$('#musicFile').addEventListener('change', (ev) => {
+  const files = [...ev.target.files].filter((f) => f.type.startsWith('audio/') || /\.(mp3|m4a|aac|ogg|oga|opus|wav|flac)$/i.test(f.name));
+  if (!files.length) return toast('沒有可以播放的音樂檔');
+  const first = TRACKS.length;
+  for (const f of files.slice(0, 50)) TRACKS.push({ t: f.name.replace(/\.[^.]+$/, '').slice(0, 60), al: '', sec: 0, url: URL.createObjectURL(f), mine: true });
+  ev.target.value = '';
+  renderTracks();
+  toast(`加入了 ${Math.min(50, files.length)} 首`);
+  playTrack(first);
+});
 $('#mPlay').addEventListener('click', togglePlay);
 $('#mNext').addEventListener('click', nextTrack);
 $('#mPrev').addEventListener('click', prevTrack);
@@ -2077,7 +2103,7 @@ if ('mediaSession' in navigator) {
   navigator.mediaSession.setActionHandler('play', togglePlay); navigator.mediaSession.setActionHandler('pause', togglePlay);
   navigator.mediaSession.setActionHandler('nexttrack', nextTrack); navigator.mediaSession.setActionHandler('previoustrack', prevTrack);
 }
-refreshPlayer();
+renderTracks();
 
 function setRain(v) { raining = v; if (room && modelsLoaded) rebuildRoom(); }
 function chime() {
