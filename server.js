@@ -340,6 +340,16 @@ function tickParties() {
   }
 }
 const roomView = (r) => ({ code: r.code, items: r.items, wall: r.wall, floor: r.floor, guestsEdit: r.guestsEdit });
+// 海報與掛畫可以換成自己的圖片:圖檔另外存在房間的 imgs 裡(用內容雜湊當檔名),物品只記雜湊,
+// 瀏覽器再用 /roomimg/房號/雜湊.jpg 讀取,所以搬家具時不必把圖片重傳給每個人
+const IMG_TYPES = ['poster', 'painting'], MAX_IMGS = 6, MAX_IMG_CHARS = 48000;
+const IMG_RE = /^data:image\/jpeg;base64,([A-Za-z0-9+/]+={0,2})$/;
+function gcImgs(room) {
+  if (!room.imgs) return;
+  const used = new Set(room.items.map((i) => i.img).filter(Boolean));
+  for (const h of Object.keys(room.imgs)) if (!used.has(h)) delete room.imgs[h];
+  if (!Object.keys(room.imgs).length) delete room.imgs;
+}
 
 function leave(c) {
   if (!c.room) return;
@@ -525,6 +535,25 @@ const handlers = {
     if (room.items.length !== n) roomChanged(room);
   },
 
+  // 換上自己的圖片(瀏覽器已經先縮成小張 JPEG);img 給空字串就是換回原本的圖案
+  item_image(c, m) {
+    const room = editable(c);
+    const it = room?.items.find((i) => i.id === m.id);
+    if (!it || !IMG_TYPES.includes(it.type) || typeof m.img !== 'string') return;
+    if (m.img === '') { if (!it.img) return; delete it.img; return roomChanged(room); }
+    const now = Date.now();
+    if (now - (c.imgAt || 0) < 800) return;
+    c.imgAt = now;
+    const hit = m.img.length <= MAX_IMG_CHARS && IMG_RE.exec(m.img);
+    const buf = hit && Buffer.from(hit[1], 'base64');
+    if (!buf || buf.length < 100 || buf[0] !== 0xff || buf[1] !== 0xd8 || buf[2] !== 0xff) return send(c, { t: 'toast', text: '這張圖片沒辦法使用,換一張試試' });
+    if (!it.img && room.items.filter((i) => i.img).length >= MAX_IMGS) return send(c, { t: 'toast', text: `一個房間最多可以放 ${MAX_IMGS} 張自己的圖片` });
+    const hash = crypto.createHash('sha256').update(buf).digest('hex').slice(0, 16);
+    (room.imgs ||= {})[hash] = hit[1];
+    it.img = hash;
+    roomChanged(room);
+  },
+
   theme(c, m) {
     const room = editable(c);
     if (!room) return;
@@ -591,6 +620,7 @@ function editable(c) {
   return room && (room.ownerKey === c.key || room.guestsEdit) ? room : null;
 }
 function roomChanged(room) {
+  gcImgs(room);
   markDirty();
   broadcast(room.code, { t: 'room', room: roomView(room) });
 }
@@ -639,6 +669,14 @@ const THREE_DIR = path.join(__dirname, 'node_modules', 'three');
 const server = http.createServer((req, res) => {
   const url = req.url.split('?')[0];
   if (url === '/healthz') return res.writeHead(200).end('ok');
+  // 房間裡自己上傳的海報/掛畫圖片(內容不會變,檔名就是內容雜湊,可以長期快取)
+  const ri = /^\/roomimg\/([A-Z0-9]{6})\/([0-9a-f]{16})\.jpg$/.exec(url);
+  if (ri) {
+    const data = rooms[ri[1]]?.imgs?.[ri[2]];
+    if (!data) return res.writeHead(404).end('Not found');
+    const buf = Buffer.from(data, 'base64');
+    return res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Content-Length': buf.length, 'Cache-Control': 'public, max-age=31536000, immutable', 'X-Content-Type-Options': 'nosniff' }).end(buf);
+  }
   let hit = STATIC[url], file;
   // three.js 由 node_modules 提供(只開放白名單內的檔案)
   const v = /^\/vendor\/three\/(three\.(?:module|core)(?:\.min)?\.js)$/.exec(url);

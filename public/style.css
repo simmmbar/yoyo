@@ -185,7 +185,10 @@ body.focusing #timerSetup, body.focusing #modes, body.focusing #poses { display:
   padding: 6px 8px 6px 18px;
   font-size: 13px; white-space: nowrap; max-width: calc(100% - 24px);
 }
+#editBar { flex-wrap: wrap; justify-content: center; row-gap: 6px; border-radius: 22px; }
 #editBar button { border-radius: 999px; }
+/* 佈置面板開著時,編輯列往左讓開,按鈕才不會被面板蓋住 */
+body:has(#drawer:not([hidden])) #editBar { left: calc((100% - 346px) / 2); max-width: calc(100% - 378px); }
 
 #drawer {
   position: fixed; right: 16px; top: 60px; bottom: 16px; width: 330px; z-index: 7;
@@ -410,6 +413,7 @@ body.focusing #timerSetup, body.focusing #modes, body.focusing #poses { display:
   #clock b { font-size: 24px; }
   #clock { bottom: 108px; left: 10px; }
   #drawer { left: 8px; right: 8px; top: auto; bottom: 8px; width: auto; height: 62vh; }
+  body:has(#drawer:not([hidden])) #editBar { left: 50%; max-width: calc(100% - 16px); bottom: calc(62vh + 16px); z-index: 8; }
   #tabs button { padding: 7px 9px; font-size: 13px; }
   #partyBar { top: 92px; border-radius: 18px; flex-wrap: wrap; justify-content: center; padding: 8px 12px; }
 }

@@ -116,6 +116,9 @@
   <span id="editHint"></span>
   <button id="editRotate">旋轉 (R)</button>
   <button id="editTint">換色 (C)</button>
+  <button id="editImage" hidden>換圖片</button>
+  <button id="editImageReset" hidden>還原圖案</button>
+  <input id="imageFile" type="file" accept="image/*" hidden>
   <button id="editRemove" hidden>收回這件</button>
   <button id="editCancel">取消</button>
 </div>
@@ -203,6 +206,8 @@
     </div>
     <p class="hint">自動會在畫面卡頓時調低解析度和特效。</p>
     <label class="check"><input type="checkbox" id="fxToggle"> 柔光效果</label>
+    <h3>聲音</h3>
+    <label class="check"><input type="checkbox" id="sfxToggle"> 動作音效(專注時的鍵盤聲、寫字聲、翻書聲)</label>
     <h3>雲端存檔</h3>
     <p class="hint">進度會自動存在伺服器。在別的裝置輸入你的存檔碼,就能接著玩。存檔碼等同密碼,請不要給別人。</p>
     <div class="row">

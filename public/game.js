@@ -144,10 +144,19 @@ const on = {
     setView(view);
     sysLog(room.mine ? '歡迎回到你的房間 ✨' : `你來到了 ${room.ownerName || '朋友'} 的房間`);
     if (m.notice) toast(m.notice);
+    if (room.mine && !backup) {
+      const re = store.get('yoyo_reimg');
+      if (re) { store.set('yoyo_reimg', ''); try { reuploadImgs(JSON.parse(re)); } catch {} }
+      cacheRoomImgs();
+    }
     saveBackup();
     if (!backup && !store.get('yoyo_tips')) $('#tips').hidden = false; // 第一次來:顯示操作提示
   },
-  restored() { location.href = room?.mine ? location.pathname : location.href; },
+  restored() {
+    const list = (loadBackup()?.data.room?.items || []).filter((i) => i.img).map((i) => ({ type: i.type, x: i.x, y: i.y, h: i.img }));
+    if (list.length) store.set('yoyo_reimg', JSON.stringify(list));
+    location.href = room?.mine ? location.pathname : location.href;
+  },
   join(m) { addPlayer(m.p); sysLog(`${m.p.name} 進來了`); toast(`${m.p.name} 進來了`); refreshMembers(); },
   leave(m) {
     const p = players.get(m.id);
@@ -179,6 +188,7 @@ const on = {
     if (!canEdit()) setHolding(null);
     rebuildRoom();
     refreshRoomUI();
+    cacheRoomImgs();
     saveBackup();
   },
   profile(m) { setProfile(m.profile); saveBackup(); },
@@ -502,6 +512,18 @@ const modelsReady = Promise.all(SFILES.map((n) => new GLTFLoader().loadAsync(`/a
   loadedN++; refreshOverlay();
 }))).then(() => { modelsLoaded = true; refreshOverlay(); });
 // 放一個模型。c = 換色(有布料換布料,否則換木頭)
+// 自己上傳的海報/掛畫圖片:先用原本的圖案頂著,載好之後換上去
+const IMG_TYPES = ['poster', 'painting'], imgMats = new Map();
+const imgUrl = (hash) => `/roomimg/${room.code}/${hash}.jpg`;
+function imgMat(hash, base) {
+  const key = room.code + hash + base;
+  if (!imgMats.has(key)) {
+    const m = toonMat(base).clone(); m.name = base;
+    new THREE.TextureLoader().load(imgUrl(hash), (t) => { t.flipY = false; t.colorSpace = THREE.SRGBColorSpace; m.map = t; m.needsUpdate = true; poke(); });
+    imgMats.set(key, m);
+  }
+  return imgMats.get(key);
+}
 function sput(g, n, o = {}) {
   const m = MODEL[n].clone();
   let fabric = false;
@@ -565,6 +587,7 @@ for (const [type, k] of Object.entries(ITEMS)) BUILD[type] = (g, o = {}) => {
   const d = CATALOG[type], bb = SBB[k.m], wall = d.kind === 'wall';
   const z = wall ? 0 : k.back ? (bb.max.z - bb.min.z) / 2 + 0.03 : d.h / 2;
   const model = sput(g, k.m, { x: d.w / 2, z, c: o.c, ry: o.side === -1 ? Math.PI : 0 });
+  if (o.img) model.traverse((ch) => { if (ch.isMesh && (ch.material.name === 'poster' || ch.material.name === 'art')) ch.material = imgMat(o.img, ch.material.name); });
   if (type === 'cat') { g.userData.cat = { rest: model, walk: sput(g, 'cat_walk', { x: d.w / 2, z }) }; g.userData.cat.walk.visible = false; }
   if (k.lamp) g.userData.lampAt = new THREE.Vector3(d.w / 2, k.lamp, wall ? 0.3 : z);
   if (k.glow) g.userData.glowAt = new THREE.Vector3(...k.glow);
@@ -927,8 +950,35 @@ function disposeAvatar(g) {
 
 // 骨架姿勢:角度以「角色面向 +z、左手在 +x」為準,[x, y, z] 弧度
 const BONES = ['hips', 'spine', 'chest', 'neck', 'head', 'leftUpperArm', 'rightUpperArm', 'leftLowerArm', 'rightLowerArm', 'leftHand', 'rightHand', 'leftUpperLeg', 'rightUpperLeg', 'leftLowerLeg', 'rightLowerLeg', 'leftFoot', 'rightFoot'];
+// 專注久了的小動作:每 24 秒一輪,大約六成的機會做一個 5 秒左右的動作
+// kind 0 托腮想一下、1 轉頭看看旁邊、2 轉轉脖子、3 伸個懶腰;e 是淡入淡出的比例
+const FORCE_ACT = new URLSearchParams(location.search).get('act');
+function microAct(t, seed) {
+  if (FORCE_ACT) return +FORCE_ACT < 4 ? { kind: +FORCE_ACT, e: 1, ph: 2.5, dir: 1 } : null; // 網址加 ?act=0~3 可以固定在某個小動作(測試用)
+  const slot = Math.floor(t / 24), ph = t - slot * 24 - 9, r = rnd01(slot * 3.7 + seed * 91);
+  if (r > 0.6 || ph < 0 || ph > 5) return null;
+  const e = Math.min(1, ph / 0.8, (5 - ph) / 0.8);
+  return { kind: Math.floor(r / 0.6 * 4) % 4, e: e * e * (3 - 2 * e), ph, dir: rnd01(slot * 1.9) > 0.5 ? 1 : -1 };
+}
+const PAGE_EVERY = 14; // 看書時每隔幾秒翻一頁
 const ORDER = { leftLowerArm: 'YXZ', rightLowerArm: 'YXZ' }; // 前臂:先轉手腕朝向,再彎手肘
 const tmpE = new THREE.Euler(), tmpQ = new THREE.Quaternion();
+function microPose(P, a) {
+  const to = (n, v) => { const b = P[n] || [0, 0, 0]; P[n] = b.map((x, i) => x + (v[i] - x) * a.e); };
+  if (a.kind === 0) { // 托腮:右手肘撐在桌上、手托著下巴,頭微微歪向一邊
+    to('rightUpperArm', [-0.6, 0.9, 1.3]); to('rightLowerArm', [0.3, 2.5, 0]); to('rightHand', [0, 0, -0.35]);
+    to('neck', [0.06, 0, 0]); to('head', [0.02, -0.14, -0.1]);
+  } else if (a.kind === 1) { // 轉頭看看旁邊
+    to('chest', [0.03, 0.14 * a.dir, 0]); to('neck', [0, 0.3 * a.dir, 0]); to('head', [-0.06, 0.42 * a.dir, 0]);
+  } else if (a.kind === 2) { // 轉轉脖子
+    const w = a.ph * 1.5;
+    to('neck', [Math.sin(w) * 0.12, 0, Math.cos(w) * 0.14]); to('head', [Math.sin(w) * 0.2, 0, Math.cos(w) * 0.24]);
+  } else { // 伸懶腰:雙手高舉、身體往後仰
+    to('leftUpperArm', [0, 0, 1.25]); to('rightUpperArm', [0, 0, -1.25]); to('leftLowerArm', [0, -0.3, 0]); to('rightLowerArm', [0, 0.3, 0]);
+    to('leftHand', [0, 0, 0]); to('rightHand', [0, 0, 0]);
+    to('spine', [-0.06, 0, 0]); to('chest', [-0.08, 0, 0]); to('neck', [0, 0, 0]); to('head', [-0.2, 0, 0]);
+  }
+}
 // st: { walking, sitting, pose(0 打字 / 1 站 / 2 看書 / 3 寫字), cheering, seatH, ownStool, t }
 function poseAvatar(g, dt, st) {
   const u = g.userData;
@@ -965,19 +1015,25 @@ function poseAvatar(g, dt, st) {
     if (st.pose === 2) { // 看書:雙手把書舉在胸前
       arms(1.2, 0.4, 1.55, 0.3, -0.2);
       P.neck = [0.22, 0, 0]; P.head = [0.18 + sin(t * 0.5) * 0.03, sin(t * 0.23) * 0.05, 0];
+      const pg = FORCE_ACT === '9' ? 0.5 : (t % PAGE_EVERY) / 0.9; // 翻頁:右手往左撥一下
+      if (pg < 1) { const s = sin(pg * Math.PI); P.rightLowerArm = [0.3, 1.35 + s * 0.4, 0]; P.rightHand = [0, s * 0.5, s * 0.3]; }
     } else if (st.noDesk) { // 面前沒有桌子(坐沙發或自備小凳子):雙手放在腿上,偶爾看看四周
       arms(1.22, 0.28, 0.95, 0.9);
       P.spine = [0.02 + breathe, 0, 0]; P.chest = [0, 0, 0];
       P.neck = [0.05, 0, 0]; P.head = [0.04 + sin(t * 0.4) * 0.03, sin(t * 0.21) * 0.25, 0];
     } else if (st.pose === 3) { // 寫字:左手壓著紙,右手小幅移動
+      const act = microAct(t, u.ph), busy = act ? 1 - act.e : 1;
       arms(1.15, 0.5, 1.38, 1.3);
-      const k = sin(t * 7) * 0.05, k2 = sin(t * 1.3) * 0.1;
+      const k = sin(t * 7) * 0.05 * busy, k2 = sin(t * 1.3) * 0.1 * busy;
       P.rightLowerArm = [1.3, 1.38 + k2 + k, 0]; P.rightHand = [0, 0, k * 2];
       P.neck = [0.3, 0, 0]; P.head = [0.22, -0.12 + k2 * 0.3, 0];
+      if (act) microPose(P, act);
     } else { // 打字:雙手放在鍵盤上,手指輕敲
+      const act = microAct(t, u.ph), busy = act ? 1 - act.e : 1;
       arms(1.15, 0.5, 1.38, 1.3);
-      P.leftHand = [0, 0, -0.12 + sin(t * 13) * 0.07]; P.rightHand = [0, 0, 0.12 + sin(t * 11 + 1) * 0.07];
+      P.leftHand = [0, 0, -0.12 + sin(t * 13) * 0.07 * busy]; P.rightHand = [0, 0, 0.12 + sin(t * 11 + 1) * 0.07 * busy];
       P.neck = [0.14, 0, 0]; P.head = [0.1 + sin(t * 0.4) * 0.03, sin(t * 0.27) * 0.06, 0];
+      if (act) microPose(P, act);
     }
   } else { // 站著:雙手自然垂下,輕微晃動
     arms(1.27, 0.03, 0.18, 0.2);
@@ -1151,6 +1207,7 @@ function rebuildRoom() {
       if (st) opt = { side: toLocal(it, st.x, st.z)[1] > 0.5 ? 1 : -1 };
     }
     if (it.c) opt = { ...opt, c: it.c };
+    if (it.img) opt = { ...opt, img: it.img };
     const inner = buildItem(it.type, opt);
     const st = seats.find((q) => q.id === it.id && !q.sofa);
     if (st) { face = st.face; if (st.desk != null) inner.position.z += ITEMS[it.type].pull || CHAIR_FWD; } // 椅子自動轉向它面對的桌子,並往桌子拉近
@@ -1196,7 +1253,7 @@ function syncGhost() {
   const hk = holding && CATALOG[holding.type].kind;
   if (gridLines) { gridLines.visible = !!hk && hk !== 'wall'; wallLines.visible = hk === 'wall'; }
   for (const g of itemsGroup.children) g.visible = !(holding?.fromId && g.userData.itemId === holding.fromId);
-  if (holding) { ghost = wrapItem(buildItem(holding.type, holding.c ? { c: holding.c } : undefined), holding.type, rotOf(holding.r) * Math.PI / 2); ghost.visible = false; scene.add(ghost); }
+  if (holding) { ghost = wrapItem(buildItem(holding.type, holding.c || holding.img ? { c: holding.c, img: holding.img } : undefined), holding.type, rotOf(holding.r) * Math.PI / 2); ghost.visible = false; scene.add(ghost); }
   ghostPad.visible = false;
 }
 
@@ -1567,7 +1624,7 @@ canvas.addEventListener('pointerup', (ev) => {
     let o = ray.intersectObjects(itemsGroup.children, true)[0]?.object;
     while (o && o.userData.itemId == null) o = o.parent;
     const it = o && room.items.find((i) => i.id === o.userData.itemId);
-    if (it) return setHolding({ type: it.type, fromId: it.id, r: rotOf(it.r), c: it.c || 0 });
+    if (it) return setHolding({ type: it.type, fromId: it.id, r: rotOf(it.r), c: it.c || 0, img: it.img });
   }
   const p = players.get(me);
   if (!p || !pt || pt.wall) return;
@@ -1939,12 +1996,68 @@ function setHolding(h) {
     $('#editRemove').hidden = !h.fromId;
     $('#editRotate').hidden = CATALOG[h.type].kind === 'wall';
     $('#editTint').hidden = !canTint(h.type);
+    $('#editImage').hidden = !(h.fromId && IMG_TYPES.includes(h.type));
+    $('#editImageReset').hidden = !(h.fromId && h.img);
   }
   document.querySelectorAll('.item').forEach((x) => x.classList.toggle('on', !!h && !h.fromId && x.dataset.type === h.type));
 }
 $('#editCancel').addEventListener('click', () => setHolding(null));
 $('#editRotate').addEventListener('click', rotateHolding);
 $('#editTint').addEventListener('click', tintHolding);
+// 海報與掛畫換成自己的圖片:先在瀏覽器裁成直式、縮小成一張小 JPEG 再上傳
+async function shrinkImage(file) {
+  const url = URL.createObjectURL(file);
+  try {
+    const im = new Image(); im.src = url; await im.decode();
+    for (const [W, H, qs] of [[384, 540, [0.82, 0.7, 0.58]], [256, 360, [0.8, 0.62, 0.45, 0.3]]]) {
+      const cv = el('canvas', { width: W, height: H }), c = cv.getContext('2d');
+      const k = Math.max(W / im.naturalWidth, H / im.naturalHeight), w = im.naturalWidth * k, h = im.naturalHeight * k;
+      c.fillStyle = '#fff'; c.fillRect(0, 0, W, H);
+      c.imageSmoothingQuality = 'high';
+      c.drawImage(im, (W - w) / 2, (H - h) / 2, w, h);
+      for (const q of qs) { const d = cv.toDataURL('image/jpeg', q); if (d.startsWith('data:image/jpeg') && d.length <= 48000) return d; }
+    }
+    return null;
+  } finally { URL.revokeObjectURL(url); }
+}
+$('#editImage').addEventListener('click', () => $('#imageFile').click());
+$('#imageFile').addEventListener('change', async (ev) => {
+  const file = ev.target.files[0], id = holding?.fromId;
+  ev.target.value = '';
+  if (!file || !id) return;
+  let img = null;
+  try { img = await shrinkImage(file); } catch {}
+  if (!img) return toast('這張圖片沒辦法使用,換一張試試');
+  send({ t: 'item_image', id, img });
+  setHolding(null);
+  toast('圖片換好了,來訪的朋友也看得到');
+});
+$('#editImageReset').addEventListener('click', () => { if (holding?.fromId) send({ t: 'item_image', id: holding.fromId, img: '' }); setHolding(null); });
+// 自己房間裡的圖片也在這個瀏覽器留一份,伺服器的資料不見時才能跟著備份一起還原
+function cacheRoomImgs() {
+  if (!room?.mine) return;
+  const used = new Set(room.items.map((i) => i.img).filter(Boolean));
+  try { for (let i = localStorage.length - 1; i >= 0; i--) { const k = localStorage.key(i); if (k?.startsWith('yoyo_img_') && !used.has(k.slice(9))) localStorage.removeItem(k); } } catch {}
+  for (const h of used) {
+    if (store.get('yoyo_img_' + h)) continue;
+    fetch(imgUrl(h)).then((r) => (r.ok ? r.blob() : null)).then((b) => {
+      if (!b) return;
+      const fr = new FileReader(); fr.onload = () => store.set('yoyo_img_' + h, fr.result); fr.readAsDataURL(b);
+    }).catch(() => {});
+  }
+}
+// 還原之後把圖片一張一張傳回去(用種類和位置找回原本那件)
+function reuploadImgs(list) {
+  const jobs = list.map((j) => ({ ...j, data: store.get('yoyo_img_' + j.h) })).filter((j) => j.data);
+  const next = () => {
+    const j = jobs.shift();
+    if (!j) return;
+    const it = room?.mine && room.items.find((i) => i.type === j.type && i.x === j.x && i.y === j.y && !i.img);
+    if (it) send({ t: 'item_image', id: it.id, img: j.data });
+    setTimeout(next, 1100);
+  };
+  next();
+}
 $('#editRemove').addEventListener('click', () => { if (holding?.fromId) send({ t: 'remove_item', id: holding.fromId }); setHolding(null); });
 
 const GROUPS = [['desk', '桌椅'], ['store', '收納'], ['rest', '床與沙發'], ['elec', '電器'], ['deco', '植物燈飾'], ['top', '桌上小物'], ['wall', '牆面'], ['rug', '地毯']];
@@ -2253,6 +2366,75 @@ if ('mediaSession' in navigator) {
 renderTracks();
 
 function setRain(v) { raining = v; if (room && modelsLoaded) rebuildRoom(); }
+// ---------- 動作音效:自己專注時的鍵盤聲、寫字聲、翻書聲(即時合成) ----------
+// 用 Web Audio 的時鐘預先排好接下來一秒多的聲音,分頁切到背景時節奏也不會亂
+let sfxOn = store.get('yoyo_sfx') !== '0', sfxOut = null, sfxBuf = null, sfxNext = 0, sfxLeft = 0, sfxPage = -1;
+function sfxWanted() {
+  const p = players.get(me), u = p?.obj?.userData;
+  if (!sfxOn || !u?.ready) return null;
+  const now = performance.now(), f = p.focus && (p.focus.mode === 'up' || p.focus.endAt > now) ? p.focus : null;
+  if (!f || f.phase !== 'focus' || p.pose === 1 || p.path?.length || !p.seat || p.seat.desk == null) return null;
+  return { pose: p.pose, ph: u.ph || 0, micro: !u.classic };
+}
+// 一小段濾過的雜訊:at 開始時間、dur 長度、f0→f1 頻率、vol 音量
+function sfxHit(at, dur, f0, f1, q, vol, attack = 0.002) {
+  const src = ac.createBufferSource(), bp = ac.createBiquadFilter(), g = ac.createGain();
+  src.buffer = sfxBuf; bp.type = 'bandpass'; bp.Q.value = q;
+  bp.frequency.setValueAtTime(f0, at); if (f1 !== f0) bp.frequency.exponentialRampToValueAtTime(f1, at + dur);
+  g.gain.setValueAtTime(0.0001, at); g.gain.exponentialRampToValueAtTime(vol, at + attack); g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+  src.connect(bp).connect(g).connect(sfxOut);
+  src.start(at, Math.random() * 1.5, dur + 0.02);
+}
+setInterval(() => {
+  const want = sfxWanted();
+  if (!ac || ac.state !== 'running') return;
+  const now = ac.currentTime;
+  if (!sfxOut) {
+    sfxOut = ac.createGain(); sfxOut.gain.value = 0; sfxOut.connect(ac.destination);
+    sfxBuf = ac.createBuffer(1, ac.sampleRate * 2, ac.sampleRate);
+    const d = sfxBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  }
+  sfxOut.gain.setTargetAtTime(want ? 1 : 0, now, 0.04); // 一離開座位就收掉已經排好的聲音
+  if (!want) { sfxNext = 0; return; }
+  if (sfxNext < now) sfxNext = now + 0.08;
+  const animT = (at) => performance.now() / 1000 + (at - now) + want.ph; // 這個時間點動畫演到哪裡
+  const R = Math.random;
+  if (want.pose === 2) { // 看書:跟著翻頁的動作
+    const t0 = animT(now), slot = Math.ceil(t0 / PAGE_EVERY);
+    const at = now + slot * PAGE_EVERY - t0;
+    if (slot !== sfxPage && at < now + 1.4) {
+      sfxPage = slot;
+      sfxHit(at + 0.1, 0.42, 900, 3600, 0.9, 0.11, 0.12); sfxHit(at + 0.5, 0.07, 2400, 1500, 1.2, 0.07);
+    }
+    return;
+  }
+  while (sfxNext < now + 1.4) {
+    const at = sfxNext, resting = want.micro && microAct(animT(at), want.ph);
+    if (want.pose === 3) { // 寫字:一筆一筆的沙沙聲,寫幾筆停一下
+      const dur = 0.07 + R() * 0.2;
+      if (!resting) sfxHit(at, dur, 2600 + R() * 1400, 3400 + R() * 2200, 1.4, 0.035 + R() * 0.02, dur * 0.3);
+      sfxNext += dur + 0.04 + R() * 0.1;
+      if (--sfxLeft < 0) { sfxLeft = 2 + Math.floor(R() * 6); sfxNext += 0.3 + R() * 0.7; }
+    } else { // 打字:清脆的按鍵聲加一點低沉的觸底聲,偶爾停頓、偶爾敲一下空白鍵
+      if (!resting) {
+        const space = R() < 0.12;
+        sfxHit(at, 0.022, 2600 + R() * 2200, 2000, 1.6, space ? 0.05 : 0.07 + R() * 0.04);
+        sfxHit(at + 0.004, space ? 0.07 : 0.04, space ? 260 : 380 + R() * 160, 200, 1.1, space ? 0.14 : 0.08);
+      }
+      sfxNext += 0.085 + R() * 0.15;
+      if (--sfxLeft < 0) { sfxLeft = 2 + Math.floor(R() * 9); sfxNext += R() < 0.2 ? 0.7 + R() * 1.3 : 0.18 + R() * 0.35; }
+    }
+  }
+}, 250);
+// 瀏覽器要等使用者點過畫面才肯出聲:按下開始專注(或專注中點一下畫面)時把聲音打開
+addEventListener('pointerdown', (ev) => {
+  if (!sfxOn || (ac && ac.state === 'running')) return;
+  if (!sfxWanted() && !ev.target.closest?.('#focusBtn, #partyBtn, #partyBar')) return;
+  try { ac = ac || new AudioContext(); ac.resume(); } catch {}
+}, true);
+$('#sfxToggle').checked = sfxOn;
+$('#sfxToggle').addEventListener('change', (ev) => { sfxOn = ev.target.checked; store.set('yoyo_sfx', sfxOn ? '1' : '0'); });
+
 function chime() {
   try {
     ac = ac || new AudioContext(); ac.resume();
