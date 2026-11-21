@@ -28,6 +28,7 @@
 - **雲端存檔**:進度存在伺服器,用「存檔碼」可在其他裝置接續
 - **本機備份自動還原**:進度同時在瀏覽器留一份;伺服器的資料不見時(例如免費主機重啟),同一台裝置回來會自動還原,房號也會換回原本的
 - **音樂播放**:10 首 lo-fi 曲目,有播放/暫停、上下一首、隨機、進度與音量;可以加入自己裝置上的音樂檔(只在本機播放,不會上傳);每個人各自播放,不會互相影響
+- **可以加到主畫面**:手機或電腦瀏覽器的「加到主畫面/安裝」會把它變成一個獨立的 App 圖示,全螢幕開啟
 - **環境音**:雨聲、白噪音(瀏覽器即時合成),可以和音樂疊在一起
 - **專注時的小動作**:打字或寫字久了,角色偶爾會托腮想一下、轉頭看看旁邊、轉轉脖子或伸個懶腰;看書時會翻頁
 - **動作音效**:自己專注時有鍵盤聲、寫字的沙沙聲、翻書聲(瀏覽器即時合成),可以在設定關掉
@@ -49,6 +50,25 @@ npm start
 | `PORT` | `3000` | 監聽埠 |
 | `DATA_DIR` | `./data` | 存檔位置(`profiles.json`、`rooms.json`) |
 
+## 測試
+
+```bash
+npm test               # 伺服器與檔案檢查,約 20 秒,不需要瀏覽器
+npm run test:browser   # 用真的瀏覽器把遊戲玩一遍(選用,需要 Playwright)
+```
+
+- `npm test` 會開一個真的伺服器(隨機連接埠、暫存資料夾),用 WebSocket 假裝成玩家,檢查連線、佈置規則、訪客權限、專注計時、圖片上傳、備份還原、重啟後存檔還在,以及模型檔和程式有沒有對上。
+- `npm run test:browser` 要先裝 Playwright(`npm i --no-save playwright && npx playwright install chromium`),沒裝會自動跳過。它會把 50 種家具都擺一遍、每個面板和按鈕都按過,畫面上出現任何錯誤就算失敗。沒有顯示卡的機器要跑五六分鐘。
+
+## 載入速度
+
+- **分兩段載入**:房間裡用到的模型先載,畫面先出來;其餘的家具(佈置面板要用的)在背景載,縮圖也是趁空檔畫。
+- **提早開始下載**:首頁會列出主程式用到的模組,並依上次的房間內容(第一次來則是預設書房)預先下載模型,不必等主程式跑起來。
+- **永久快取**:模型、three.js、主程式的網址都帶著內容版本,內容沒變就不會重新下載,改了網址就跟著變。其餘檔案用 ETag 確認,沒變回 304。
+- **模型壓縮**:家具模型用 meshopt 壓縮過(6.0 MB → 2.1 MB)。重新產生模型後要再壓一次:`cd tools && npm install && node pack-models.mjs`(已經壓過的會跳過)。
+
+第一次開啟大約下載 2.9 MB(原本 4.3 MB),之後再開幾乎不用下載。
+
 ## 部署
 
 這是一個單一 Node 行程(HTTP + WebSocket),可部署到任何支援 WebSocket 的平台(Render、Railway、Fly.io、自己的 VPS 等),啟動指令為 `npm start`。
@@ -64,12 +84,15 @@ server.js          伺服器:靜態檔案、WebSocket 協定、驗證與存檔
 public/index.html  頁面
 public/style.css   樣式
 public/game.js     3D 場景(three.js)、連線、計時、佈置、聊天、環境音
+public/icons/      App 圖示;public/manifest.webmanifest 是「加到主畫面」用的設定
+test/              自動測試(見上面的「測試」)
+tools/             製作模型用的工具(跑遊戲不需要):blender/furniture.py 產生模型,pack-models.mjs 壓縮模型
 ```
 
 ## 素材授權
 
 - 角色模型:VRoid Studio 範例角色(pixiv 發布,CC0),共 6 個。檔案在 `public/assets/avatars/`,貼圖經過縮小;動作是程式即時擺出來的,沒有使用動作檔。顯示用 `@pixiv/three-vrm`(MIT)。
 - 積木風角色與動作:Ultimate Animated Character Pack(作者 Quaternius,quaternius.com),CC0,共 6 個。檔案在 `public/assets/characters/`,取得來源寫在同資料夾的 `LICENSE.txt`。
-- 家具、門窗、掛飾、貓咪:全部是本專案自己用 Blender 的 Python 介面做的原創模型,共 45 個。原始程式在 `tools/blender/furniture.py`(`pip install bpy` 後執行即可重新產生),輸出在 `public/assets/studio/`。遊戲裡用卡通打光加描邊顯示,和動漫角色同一種畫法;木紋和布紋是遊戲端畫的可重複花紋,靠模型裡以公尺為單位的貼圖座標貼上去,紋路順著每個零件的長邊;地毯、窗景、掛畫、螢幕畫面是遊戲端畫的。
+- 家具、門窗、掛飾、貓咪:全部是本專案自己用 Blender 的 Python 介面做的原創模型,共 45 個。原始程式在 `tools/blender/furniture.py`(`pip install bpy` 後執行即可重新產生),輸出在 `public/assets/studio/`,產生後再用 `tools/pack-models.mjs` 壓縮。遊戲裡用卡通打光加描邊顯示,和動漫角色同一種畫法;木紋和布紋是遊戲端畫的可重複花紋,靠模型裡以公尺為單位的貼圖座標貼上去,紋路順著每個零件的長邊;地毯、窗景、掛畫、螢幕畫面是遊戲端畫的。
 - 音樂:HoliznaCC0 的 lo-fi 曲目(Winter Lofi、Public Domain Lofi、Summer Air 三張專輯共 10 首),CC0。檔案在 `public/assets/music/`,經過重新壓縮;曲目清單在同資料夾的 `LICENSE.txt`。
 - 各資料夾內有 `LICENSE.txt`。

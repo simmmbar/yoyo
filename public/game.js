@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
@@ -94,14 +95,20 @@ function saveBackup() {
     store.set('yoyo_backup', JSON.stringify({ tk: token, at: Date.now(), data }));
   }, 800);
 }
-// 載入畫面:連上線、家具模型也都載完才收起來,過程中顯示進度
-let netReady = false, loadedN = 0;
+// 記下自己房間用到哪些模型、自己是哪個角色:下次開啟時首頁會提早開始下載,不必等主程式跑起來
+function savePreload() {
+  if (!room?.mine || !profile) return;
+  const h = profile.avatar?.hair || 0;
+  store.set('yoyo_pre', JSON.stringify({ code: room.code, m: roomModels(), a: h < 6 ? `avatars/${CHAR_FILES[h % CHAR_FILES.length]}.vrm` : `characters/${CLASSIC_FILES[(h - 6) % CLASSIC_FILES.length]}.glb` }));
+}
+// 載入畫面:連上線、房間用到的模型也載完才收起來,過程中顯示進度
+let netReady = false;
 function refreshOverlay() {
   if (kicked) return;
-  const done = netReady && modelsLoaded;
+  const done = netReady && roomLoaded;
   $('#overlay').hidden = done;
   if (restoring) { $('#overlay').hidden = false; $('#overlayText').textContent = '正在還原你的進度…'; return; }
-  if (!done) $('#overlayText').textContent = netReady ? `正在佈置房間… ${Math.round((loadedN / SFILES.length) * 100)}%` : '連線中…';
+  if (!done) $('#overlayText').textContent = netReady ? `正在佈置房間… ${roomNeed ? Math.round((roomNeed.filter((n) => MODEL[n]).length / roomNeed.length) * 100) : 0}%` : '連線中…';
 }
 function addPlayer(p) {
   const old = players.get(p.id);
@@ -138,7 +145,7 @@ const on = {
     buildEmotes(m.emotes);
     buildPresets(m.presets || []);
     applyMood();
-    modelsReady.then(() => { rebuildRoom(); buildCatalog(); });
+    loadRoomModels().then(() => { rebuildRoom(); loadRest(); if (modelsLoaded) buildCatalog(); });
     refreshRoomUI();
     refreshMembers();
     setView(view);
@@ -150,6 +157,7 @@ const on = {
       cacheRoomImgs();
     }
     saveBackup();
+    savePreload();
     if (!backup && !store.get('yoyo_tips')) $('#tips').hidden = false; // 第一次來:顯示操作提示
   },
   restored() {
@@ -189,9 +197,9 @@ const on = {
     rebuildRoom();
     refreshRoomUI();
     cacheRoomImgs();
-    saveBackup();
+    saveBackup(); savePreload();
   },
-  profile(m) { setProfile(m.profile); saveBackup(); },
+  profile(m) { setProfile(m.profile); saveBackup(); savePreload(); },
   party(m) { setParty(m.party); },
   party_done(m) {
     const now = performance.now();
@@ -498,19 +506,57 @@ function toonMat(name, hex) {
   return toonCache.get(key);
 }
 const flat = (name) => name === 'outline' || name === 'mirror' || name === 'shade' || !!TEX[name]; // 不受光、也不投影的材質
-const modelsReady = Promise.all(SFILES.map((n) => new GLTFLoader().loadAsync(`/assets/studio/${n}.glb`).then((g) => {
-  g.scene.traverse((o) => {
-    if (!o.isMesh) return;
-    const nm = o.material.name;
-    o.userData.hex = '#' + o.material.color.getHexString();
-    o.material = toonMat(nm, o.userData.hex);
-    o.castShadow = o.receiveShadow = !flat(nm);
-    if (nm === 'fabric' || nm === 'wood') STINT[n] = true;
-  });
-  MODEL[n] = g.scene;
-  SBB[n] = new THREE.Box3().setFromObject(g.scene);
-  loadedN++; refreshOverlay();
-}))).then(() => { modelsLoaded = true; refreshOverlay(); });
+// 模型檔的網址:首頁附了每個檔案的版本,帶著版本讀就可以永久快取
+const ASSET_V = window.__ASSETS || {};
+const assetUrl = (p) => `/assets/${p}${ASSET_V[p] ? '?v=' + ASSET_V[p] : ''}`;
+const studioLoader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder); // 家具模型是壓縮過的(meshopt)
+const modelJobs = new Map();
+function loadModel(n, retry = 2) {
+  if (!modelJobs.has(n)) modelJobs.set(n, studioLoader.loadAsync(assetUrl(`studio/${n}.glb`)).then((g) => {
+    g.scene.traverse((o) => {
+      if (!o.isMesh) return;
+      const nm = o.material.name;
+      o.userData.hex = '#' + o.material.color.getHexString();
+      o.material = toonMat(nm, o.userData.hex);
+      o.castShadow = o.receiveShadow = !flat(nm);
+      if (nm === 'fabric' || nm === 'wood') STINT[n] = true;
+    });
+    MODEL[n] = g.scene;
+    SBB[n] = new THREE.Box3().setFromObject(g.scene);
+    refreshOverlay();
+  }, (err) => { // 網路不穩時再試幾次
+    modelJobs.delete(n);
+    if (retry <= 0) throw err;
+    return new Promise((r) => setTimeout(r, 1500)).then(() => loadModel(n, retry - 1));
+  }));
+  return modelJobs.get(n);
+}
+// 分兩段載入:房間裡用到的模型先載,畫面先出來;其餘的(佈置面板要用的)在背景慢慢載
+const modelsOf = (type) => [ITEMS[type]?.m, type === 'cat' ? 'cat_walk' : null].filter(Boolean);
+const roomModels = () => [...new Set(['door', 'pendant', ...room.items.flatMap((it) => modelsOf(it.type))])];
+let roomLoaded = false, roomNeed = null, restStarted = false, allDone;
+const modelsReady = new Promise((r) => { allDone = r; });
+function loadRoomModels() {
+  roomLoaded = false; roomNeed = roomModels();
+  return Promise.all(roomNeed.map((n) => loadModel(n))).then(() => { roomLoaded = true; refreshOverlay(); });
+}
+function loadRest() {
+  if (restStarted) return;
+  restStarted = true;
+  const queue = SFILES.filter((n) => !modelJobs.has(n));
+  const worker = () => { const n = queue.shift(); return n ? loadModel(n).then(worker) : null; };
+  Promise.all([worker(), worker(), worker()]).then(() => Promise.all(SFILES.map((n) => loadModel(n)))).then(() => {
+    modelsLoaded = true; allDone();
+    buildCatalog();
+  }).catch(() => toast('有些家具模型沒載到,重新整理頁面再試一次'));
+}
+// 房間裡出現還沒載到的家具(例如朋友剛放了一件新的):載好之後再重畫一次
+let rebuildQueued = false;
+function rebuildSoon() {
+  if (rebuildQueued) return;
+  rebuildQueued = true;
+  setTimeout(() => { rebuildQueued = false; rebuildRoom(); }, 0);
+}
 // 放一個模型。c = 換色(有布料換布料,否則換木頭)
 // 自己上傳的海報/掛畫圖片:先用原本的圖案頂著,載好之後換上去
 const IMG_TYPES = ['poster', 'painting'], imgMats = new Map();
@@ -626,7 +672,7 @@ function surfaceRect(it) {
 function surfAt(cx, cz) {
   let top = 0;
   for (const it of room.items) {
-    if (!surfTop(it) || CATALOG[it.type]?.kind !== 'floor') continue;
+    if (!surfTop(it) || CATALOG[it.type]?.kind !== 'floor' || !SBB[ITEMS[it.type].m]) continue;
     const [x0, x1, z0, z1] = surfaceRect(it);
     if (cx >= x0 && cx <= x1 && cz >= z0 && cz <= z1) top = Math.max(top, surfTop(it));
   }
@@ -777,7 +823,7 @@ const AV_SCALE = 1.15; // 家具模型偏大,角色放大一點比例才協調
 const AVATAR_H = 1.55 * AV_SCALE, SIT_FWD = 0.3, CHAIR_FWD = 0.14; // 椅子往桌子拉近一點 // 坐下時往桌子靠近一點,手才搆得到鍵盤
 const charCache = new Map(); // 同一個檔案只下載一次;每位玩家各自解析出一份
 const loadChar = (i) => {
-  if (!charCache.has(i)) charCache.set(i, fetch(`/assets/avatars/${CHAR_FILES[i]}.vrm`).then((r) => { if (!r.ok) throw new Error('avatar ' + r.status); return r.arrayBuffer(); }));
+  if (!charCache.has(i)) charCache.set(i, fetch(assetUrl(`avatars/${CHAR_FILES[i]}.vrm`)).then((r) => { if (!r.ok) throw new Error('avatar ' + r.status); return r.arrayBuffer(); }));
   return charCache.get(i);
 };
 const vrmLoader = new GLTFLoader();
@@ -837,7 +883,7 @@ const CLASSIC_SHIRT = ['#f08d94', '#ffc98a', '#9ed59a', '#7cc3d6', '#8c9cea', '#
 const CLASSIC_H = 1.62, VROID_TOP = 0.215; // 身高;VROID_TOP = 動漫角色頭頂比頭部骨架高多少(配件是照這個尺寸做的)
 const classicCache = new Map();
 function loadClassic(i) {
-  if (!classicCache.has(i)) classicCache.set(i, new GLTFLoader().loadAsync(`/assets/characters/${CLASSIC_FILES[i]}.glb`).then((gl) => {
+  if (!classicCache.has(i)) classicCache.set(i, new GLTFLoader().loadAsync(assetUrl(`characters/${CLASSIC_FILES[i]}.glb`)).then((gl) => {
     gl.scene.updateMatrixWorld(true);
     const bb = new THREE.Box3();
     gl.scene.traverse((o) => { if (o.isSkinnedMesh) { o.computeBoundingBox(); bb.union(o.boundingBox.clone().applyMatrix4(o.matrixWorld)); } });
@@ -878,7 +924,7 @@ function buildClassic(a, onReady) {
           am.scale.setScalar(acc.fit ? (VROID_TOP / 0.8 + 0.015) / acc.fit : (acc.scale || 1) * (acc === GLASSES ? 1.45 : 1.05));
         }
       };
-      if (modelsLoaded) wear(); else modelsReady.then(wear);
+      if (worn.every((k) => MODEL[k.m])) wear(); else Promise.all(worn.map((k) => loadModel(k.m))).then(wear, () => {});
     }
     const mixer = new THREE.AnimationMixer(m), act = {};
     for (const n of ['Idle', 'Walk', 'SitDown', 'Victory']) { const clip = c.clips.find((k) => k.name === n); if (clip) act[n] = mixer.clipAction(clip); }
@@ -896,7 +942,7 @@ function poseClassic(g, dt, st) {
   if (want !== u.cur && u.act[want]) { u.act[want].reset().fadeIn(0.2).play(); u.act[u.cur]?.fadeOut(0.2); u.cur = want; }
   u.mixer.update(dt);
   u.head.scale.setScalar(u.headK); // 動作會把骨頭的大小寫回去,每格重新套用
-  if (!u.seat && modelsLoaded) u.seat = sput(g, 'stool');
+  if (!u.seat && MODEL.stool) u.seat = sput(g, 'stool');
   if (u.seat) u.seat.visible = u.cur === 'SitDown' && !!st.ownStool;
 }
 
@@ -931,7 +977,7 @@ function buildAvatar(a, onReady) {
           m.scale.setScalar(acc.fit ? Math.max(1, (top + 0.015) / acc.fit) : acc.scale || 1);
         }
       };
-      if (modelsLoaded) wear(); else modelsReady.then(wear);
+      if (worn.every((k) => MODEL[k.m])) wear(); else Promise.all(worn.map((k) => loadModel(k.m))).then(wear, () => {});
     }
     const gaze = new THREE.Object3D(); scene.add(gaze);
     if (vrm.lookAt) vrm.lookAt.target = gaze;
@@ -1072,7 +1118,7 @@ function poseAvatar(g, dt, st) {
   if (mode === 'sit') g.localToWorld(tmpV2.set(0, 0.8, 0.55)); else tmpV2.copy(camera.position);
   u.gaze.position.lerp(tmpV2, dt ? Math.min(1, dt * 4) : 1);
   // 沒有空椅子時自備的小凳子、看書時手上的書
-  if (!u.seat && modelsLoaded) u.seat = sput(g, 'stool');
+  if (!u.seat && MODEL.stool) u.seat = sput(g, 'stool');
   if (u.seat) u.seat.visible = mode === 'sit' && !!st.ownStool;
   if (!u.book) {
     u.book = new THREE.Group();
@@ -1190,7 +1236,7 @@ function wrapItem(inner, type, face) {
   return g;
 }
 function rebuildRoom() {
-  if (!room || !modelsLoaded) return;
+  if (!room || !roomLoaded) return;
   if (!floorMesh) buildShell();
   // 牆和地板帶一點自發光,背光的那幾面才不會灰暗
   for (const w of wallPlanes) { w.material.map = w.material.emissiveMap = wallTex(room.wall, w.userData.width); w.material.needsUpdate = true; }
@@ -1201,6 +1247,8 @@ function rebuildRoom() {
   lampLights = []; glowLights = []; neonLights = []; beamLights = [];
   for (const it of room.items) {
     if (!CATALOG[it.type]) continue;
+    const missing = modelsOf(it.type).filter((n) => !MODEL[n]);
+    if (missing.length) { Promise.all(missing.map((n) => loadModel(n))).then(rebuildSoon, () => {}); continue; }
     let opt, face = rotOf(it.r) * Math.PI / 2;
     if (it.type === 'kdesk') { // 工作桌的抽屜面朝向椅子
       const st = seats.find((q) => q.desk === it.id);
@@ -1270,7 +1318,7 @@ function applyQuality() {
   if (sh.mapSize.x !== size) { sh.mapSize.set(size, size); sh.map?.dispose(); sh.map = null; }
   if (composer) { composer.dispose?.(); composer = null; }
   fitCamera();
-  if (room && modelsLoaded) rebuildRoom(); // 燈的數量跟著畫質調整
+  if (room && roomLoaded) rebuildRoom(); // 燈的數量跟著畫質調整
 }
 function measureFps(t) {
   if (qPref !== 'auto' || qLevel >= 3 || document.hidden || !modelsLoaded) { fpsT0 = 0; return; }
@@ -1663,7 +1711,7 @@ function openTab(name) {
   $('#drawerTitle').textContent = TAB_TITLES[name] || '';
   document.querySelectorAll('#tabs button').forEach((x) => x.classList.toggle('on', x.dataset.tab === name));
   document.querySelectorAll('.tab').forEach((x) => x.classList.toggle('on', x.id === 'tab-' + name));
-  if (name !== 'decor') setHolding(null);
+  if (name !== 'decor') setHolding(null); else drainThumbs(true);
   if (name === 'avatar') renderAvatarPreview();
   if (name === 'stats') renderStats();
   if (name === 'chat') { $('#tabs [data-tab=chat]').classList.remove('dot'); $('#chatLog').scrollTop = 1e9; }
@@ -2067,11 +2115,20 @@ function showGroup(gk) {
   document.querySelectorAll('#catTabs button').forEach((b) => b.classList.toggle('on', b.dataset.g === gk));
   document.querySelectorAll('#catalog .item').forEach((c) => { c.hidden = c.dataset.g !== gk; });
 }
+// 家具縮圖:趁畫面閒著的時候一張一張畫,不要卡住剛進房間的那幾秒;打開佈置面板時把剩下的一次畫完
+let thumbQueue = [];
+const whenIdle = window.requestIdleCallback ? (f) => requestIdleCallback(f, { timeout: 1500 }) : (f) => setTimeout(f, 80);
+function drainThumbs(all) {
+  const t0 = performance.now();
+  while (thumbQueue.length && (all === true || performance.now() - t0 < 10)) { const [type, cv, dir] = thumbQueue.shift(); snapshot(buildItem(type), cv, dir); }
+  if (thumbQueue.length) whenIdle(drainThumbs);
+}
 function buildCatalog() {
+  thumbQueue = [];
   $('#catTabs').replaceChildren(...GROUPS.map(([gk, name]) => { const b = el('button', { type: 'button', textContent: name }); b.dataset.g = gk; b.onclick = () => showGroup(gk); return b; }));
   $('#catalog').replaceChildren(...Object.entries(CATALOG).map(([type, d]) => {
     const cv = el('canvas', { width: 160, height: 160 });
-    snapshot(buildItem(type), cv, d.kind === 'wall' ? FRONT_DIR : VIEW_DIR);
+    thumbQueue.push([type, cv, d.kind === 'wall' ? FRONT_DIR : VIEW_DIR]);
     const card = el('div', { className: 'item' }, cv, el('span', { textContent: d.name }));
     card.dataset.type = type; card.dataset.g = d.g || 'deco';
     card.addEventListener('click', () => {
@@ -2081,6 +2138,7 @@ function buildCatalog() {
     return card;
   }));
   showGroup(catGroup);
+  if (currentTab === 'decor') drainThumbs(true); else whenIdle(drainThumbs);
 }
 function buildPresets(list) {
   $('#presets2').replaceChildren(...list.map((p) => {
@@ -2365,7 +2423,7 @@ if ('mediaSession' in navigator) {
 }
 renderTracks();
 
-function setRain(v) { raining = v; if (room && modelsLoaded) rebuildRoom(); }
+function setRain(v) { raining = v; if (room && roomLoaded) rebuildRoom(); }
 // ---------- 動作音效:自己專注時的鍵盤聲、寫字聲、翻書聲(即時合成) ----------
 // 用 Web Audio 的時鐘預先排好接下來一秒多的聲音,分頁切到背景時節奏也不會亂
 let sfxOn = store.get('yoyo_sfx') !== '0', sfxOut = null, sfxBuf = null, sfxNext = 0, sfxLeft = 0, sfxPage = -1;

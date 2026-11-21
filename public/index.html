@@ -4,9 +4,57 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>悠悠自習室</title>
+<meta name="description" content="可以佈置的專注小房間:番茄鐘、待辦與習慣、和朋友一起專注。">
+<meta name="theme-color" content="#2b2540">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="悠悠自習室">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="stylesheet" href="style.css">
 <script type="importmap">
 { "imports": { "three": "/vendor/three/three.module.js", "three/addons/": "/vendor/addons/", "@pixiv/three-vrm": "/vendor/three-vrm.js" } }
+</script>
+<!-- 主程式用到的模組先一起下載,不必一層一層等 -->
+<link rel="modulepreload" href="/vendor/three/three.module.js">
+<link rel="modulepreload" href="/vendor/three/three.core.js">
+<link rel="modulepreload" href="/vendor/three-vrm.js">
+<link rel="modulepreload" href="/vendor/addons/geometries/RoundedBoxGeometry.js">
+<link rel="modulepreload" href="/vendor/addons/loaders/GLTFLoader.js">
+<link rel="modulepreload" href="/vendor/addons/libs/meshopt_decoder.module.js">
+<link rel="modulepreload" href="/vendor/addons/utils/BufferGeometryUtils.js">
+<link rel="modulepreload" href="/vendor/addons/utils/SkeletonUtils.js">
+<link rel="modulepreload" href="/vendor/addons/postprocessing/EffectComposer.js">
+<link rel="modulepreload" href="/vendor/addons/shaders/CopyShader.js">
+<link rel="modulepreload" href="/vendor/addons/postprocessing/ShaderPass.js">
+<link rel="modulepreload" href="/vendor/addons/postprocessing/Pass.js">
+<link rel="modulepreload" href="/vendor/addons/postprocessing/MaskPass.js">
+<link rel="modulepreload" href="/vendor/addons/postprocessing/RenderPass.js">
+<link rel="modulepreload" href="/vendor/addons/postprocessing/UnrealBloomPass.js">
+<link rel="modulepreload" href="/vendor/addons/shaders/LuminosityHighPassShader.js">
+<link rel="modulepreload" href="/vendor/addons/postprocessing/OutputPass.js">
+<link rel="modulepreload" href="/vendor/addons/shaders/OutputShader.js">
+<!--ASSETS-->
+<script>
+// 房間會用到的模型提早開始下載(主程式還在載入時就先排進去)。
+// 來過的人照上次自己房間的內容;第一次來的人照預設的書房。
+(function () {
+  try {
+    var V = window.__ASSETS || {}, q = new URLSearchParams(location.search).get('room'), pre = null;
+    try { pre = JSON.parse(localStorage.getItem('yoyo_pre')); } catch (e) {}
+    if (q && !(pre && pre.code === q)) return;
+    var first = ['door', 'pendant', 'bookcase', 'plant_big', 'chair', 'lowcase', 'cabinet', 'desk', 'floorlamp', 'sofa', 'coffee', 'sideboard', 'side', 'cat', 'cat_walk', 'laptop', 'lamp', 'books', 'teaset', 'radio', 'succulent', 'plant_small', 'window', 'poster', 'frame', 'walllamp', 'clock'];
+    var files = ((pre && pre.m) || first).map(function (n) { return 'studio/' + n + '.glb'; });
+    if (pre && pre.a) files.push(pre.a);
+    files.forEach(function (p) {
+      if (!V[p]) return;
+      var l = document.createElement('link');
+      l.rel = 'preload'; l.as = 'fetch'; l.crossOrigin = 'anonymous'; l.href = '/assets/' + p + '?v=' + V[p];
+      document.head.appendChild(l);
+    });
+  } catch (e) {}
+})();
 </script>
 </head>
 <body>

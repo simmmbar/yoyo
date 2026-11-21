@@ -1,0 +1,12 @@
+{
+  "name": "yoyo-tools",
+  "private": true,
+  "description": "Build-time helpers for the furniture models. Not needed to run the game.",
+  "type": "module",
+  "dependencies": {
+    "@gltf-transform/core": "^4.5.1",
+    "@gltf-transform/extensions": "^4.5.1",
+    "@gltf-transform/functions": "^4.5.1",
+    "meshoptimizer": "^1.0.1"
+  }
+}

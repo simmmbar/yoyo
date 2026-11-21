@@ -4,7 +4,9 @@
   "description": "悠悠自習室 — 線上多人專注小屋(番茄鐘、房間佈置、角色、聊天)",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test test/server.test.js test/assets.test.js",
+    "test:browser": "node --test test/browser.test.js"
   },
   "engines": {
     "node": ">=18"

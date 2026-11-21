@@ -659,67 +659,114 @@ prune();
 setInterval(prune, 12 * 3600000);
 
 // ---------- HTTP ----------
+const PUBLIC = path.join(__dirname, 'public');
 const STATIC = {
-  '/': ['index.html', 'text/html; charset=utf-8'],
-  '/index.html': ['index.html', 'text/html; charset=utf-8'],
   '/style.css': ['style.css', 'text/css; charset=utf-8'],
   '/game.js': ['game.js', 'text/javascript; charset=utf-8'],
+  '/manifest.webmanifest': ['manifest.webmanifest', 'application/manifest+json; charset=utf-8'],
 };
+const ICONS = /^\/icons\/([\w-]+\.png)$/;
 const THREE_DIR = path.join(__dirname, 'node_modules', 'three');
+const VRM_DIR = path.join(__dirname, 'node_modules', '@pixiv', 'three-vrm');
+const pkgVer = (dir) => { try { return JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')).version; } catch { return '0'; } };
+const THREE_VER = pkgVer(THREE_DIR), VRM_VER = pkgVer(VRM_DIR);
+const sha = (buf, n = 10) => crypto.createHash('sha1').update(buf).digest('hex').slice(0, n);
+// 模型檔的版本:啟動時算出每個檔案的內容雜湊寫進首頁,瀏覽器用「?v=雜湊」讀取。
+// 內容不變網址就不變,可以永久快取;檔案一改網址跟著變,不會讀到舊的
+const ASSET_VER = {};
+for (const dir of ['studio', 'avatars', 'characters']) {
+  let names = [];
+  try { names = fs.readdirSync(path.join(PUBLIC, 'assets', dir)); } catch {}
+  for (const f of names) if (/^[\w-]+\.(glb|vrm)$/.test(f)) ASSET_VER[`${dir}/${f}`] = sha(fs.readFileSync(path.join(PUBLIC, 'assets', dir, f)));
+}
+const IMMUTABLE = 'public, max-age=31536000, immutable';
+// 首頁:把 three.js、主程式、樣式的網址都加上版本,並附上模型檔的版本表(主程式和樣式一改就重新產生)
+let indexCache = null;
+function renderIndex() {
+  const files = ['index.html', 'game.js', 'style.css'].map((f) => path.join(PUBLIC, f));
+  const key = files.map((f) => { const st = fs.statSync(f); return `${st.size}-${st.mtimeMs}`; }).join('|');
+  if (indexCache?.key === key) return indexCache;
+  const ver = { '/style.css': sha(fs.readFileSync(files[2]), 8), '/game.js': sha(fs.readFileSync(files[1]), 8) };
+  const html = fs.readFileSync(files[0], 'utf8')
+    .replaceAll('/vendor/three/', `/vendor/three@${THREE_VER}/`).replaceAll('/vendor/addons/', `/vendor/addons@${THREE_VER}/`)
+    .replaceAll('/vendor/three-vrm.js', `/vendor/three-vrm@${VRM_VER}.js`)
+    .replace('href="style.css"', `href="style.css?v=${ver['/style.css']}"`).replace('src="game.js"', `src="game.js?v=${ver['/game.js']}"`)
+    .replace('<!--ASSETS-->', `<script>window.__ASSETS=${JSON.stringify(ASSET_VER)}</script>`);
+  const buf = Buffer.from(html);
+  return (indexCache = { key, ver, buf, gz: zlib.gzipSync(buf), etag: `"${sha(buf, 16)}"` });
+}
+const GZ = new Map(); // 壓縮結果快取(檔案有改就重新壓)
 const server = http.createServer((req, res) => {
-  const url = req.url.split('?')[0];
+  const [url, query = ''] = req.url.split('?');
   if (url === '/healthz') return res.writeHead(200).end('ok');
+  const wantGz = /gzip/.test(req.headers['accept-encoding'] || '');
+  if (url === '/' || url === '/index.html') {
+    let page;
+    try { page = renderIndex(); } catch { return res.writeHead(500).end('error'); }
+    const headers = { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache', ETag: page.etag, Vary: 'Accept-Encoding' };
+    if (req.headers['if-none-match'] === page.etag) return res.writeHead(304, headers).end();
+    return wantGz ? res.writeHead(200, { ...headers, 'Content-Encoding': 'gzip' }).end(page.gz) : res.writeHead(200, headers).end(page.buf);
+  }
   // 房間裡自己上傳的海報/掛畫圖片(內容不會變,檔名就是內容雜湊,可以長期快取)
   const ri = /^\/roomimg\/([A-Z0-9]{6})\/([0-9a-f]{16})\.jpg$/.exec(url);
   if (ri) {
     const data = rooms[ri[1]]?.imgs?.[ri[2]];
     if (!data) return res.writeHead(404).end('Not found');
     const buf = Buffer.from(data, 'base64');
-    return res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Content-Length': buf.length, 'Cache-Control': 'public, max-age=31536000, immutable', 'X-Content-Type-Options': 'nosniff' }).end(buf);
+    return res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Content-Length': buf.length, 'Cache-Control': IMMUTABLE, 'X-Content-Type-Options': 'nosniff' }).end(buf);
   }
-  let hit = STATIC[url], file;
-  // three.js 由 node_modules 提供(只開放白名單內的檔案)
-  const v = /^\/vendor\/three\/(three\.(?:module|core)(?:\.min)?\.js)$/.exec(url);
-  if (v) { hit = [null, 'text/javascript; charset=utf-8']; file = path.join(THREE_DIR, 'build', v[1]); }
-  const ad = /^\/vendor\/addons\/((?:[\w-]+\/)*[\w-]+\.js)$/.exec(url);
-  if (ad) { hit = [null, 'text/javascript; charset=utf-8']; file = path.join(THREE_DIR, 'examples/jsm', ad[1]); }
-  if (url === '/vendor/three-vrm.js') { hit = [null, 'text/javascript; charset=utf-8']; file = path.join(__dirname, 'node_modules/@pixiv/three-vrm/lib/three-vrm.module.min.js'); }
+  // type:內容類型;file:檔案位置;fixed:網址帶著正確的版本,內容永遠不會變
+  let type, file, fixed = false;
+  const qv = /(?:^|&)v=([\w.-]+)/.exec(query)?.[1];
+  if (STATIC[url]) { [file, type] = STATIC[url]; file = path.join(PUBLIC, file); try { fixed = !!qv && qv === renderIndex().ver[url]; } catch {} }
+  const ic = ICONS.exec(url);
+  if (ic) { type = 'image/png'; file = path.join(PUBLIC, 'icons', ic[1]); }
+  // three.js 由 node_modules 提供(只開放白名單內的檔案);網址裡的 @版本 只是用來讓快取跟著版本走
+  const v = /^\/vendor\/three(?:@([\w.-]+))?\/(three\.(?:module|core)\.js)$/.exec(url);
+  if (v) { type = 'text/javascript; charset=utf-8'; file = path.join(THREE_DIR, 'build', v[2]); fixed = v[1] === THREE_VER; }
+  const ad = /^\/vendor\/addons(?:@([\w.-]+))?\/((?:[\w-]+\/)*[\w-]+(?:\.[\w-]+)*\.js)$/.exec(url);
+  if (ad) { type = 'text/javascript; charset=utf-8'; file = path.join(THREE_DIR, 'examples/jsm', ad[2]); fixed = ad[1] === THREE_VER; }
+  const vr = /^\/vendor\/three-vrm(?:@([\w.-]+))?\.js$/.exec(url);
+  if (vr) { type = 'text/javascript; charset=utf-8'; file = path.join(VRM_DIR, 'lib/three-vrm.module.min.js'); fixed = vr[1] === VRM_VER; }
   // 家具(原創)、角色模型(VRoid 範例角色,CC0)、音樂(CC0)
   const as = /^\/assets\/(studio|avatars|characters|music)\/([\w-]+\.(glb|vrm|txt|mp3))$/.exec(url);
   if (as) {
     const types = { glb: 'model/gltf-binary', vrm: 'application/octet-stream', txt: 'text/plain; charset=utf-8', mp3: 'audio/mpeg' };
-    hit = [null, types[as[3]]]; file = path.join(__dirname, 'public/assets', as[1], as[2]);
+    type = types[as[3]]; file = path.join(PUBLIC, 'assets', as[1], as[2]);
+    fixed = !!qv && qv === ASSET_VER[`${as[1]}/${as[2]}`];
   }
-  if (!hit) return res.writeHead(404).end('Not found');
-  // 模型與 three.js 內容不常變動,讓瀏覽器快取一天;文字類檔案用 gzip 壓縮後再送
-  const full = file || path.join(__dirname, 'public', hit[0]);
-  const headers = { 'Content-Type': hit[1], 'Cache-Control': file ? 'public, max-age=86400' : 'no-cache' };
-  // 音樂:支援分段讀取(Range)。Safari 和 iOS 沒有這個就不肯播放,也才能拖曳進度
-  if (hit[1] === 'audio/mpeg') {
-    return fs.stat(full, (err, st) => {
-      if (err) return res.writeHead(404).end('Not found');
-      const base = { ...headers, 'Accept-Ranges': 'bytes' };
+  if (!file) return res.writeHead(404).end('Not found');
+  fs.stat(file, (err, st) => {
+    if (err || !st.isFile()) return res.writeHead(404).end('Not found');
+    // 帶版本的網址永久快取;其他的讓瀏覽器每次問一下有沒有變(沒變就回 304,不必重新下載)
+    const etag = `"${st.size.toString(36)}-${Math.floor(st.mtimeMs).toString(36)}"`;
+    const headers = { 'Content-Type': type, 'Cache-Control': fixed ? IMMUTABLE : 'no-cache', ETag: etag };
+    // 音樂:支援分段讀取(Range)。Safari 和 iOS 沒有這個就不肯播放,也才能拖曳進度
+    if (type === 'audio/mpeg') {
+      const base = { ...headers, 'Cache-Control': 'public, max-age=86400', 'Accept-Ranges': 'bytes' };
       const m = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range || '');
-      if (!m || (!m[1] && !m[2])) { res.writeHead(200, { ...base, 'Content-Length': st.size }); return fs.createReadStream(full).pipe(res); }
-      let start = m[1] ? +m[1] : Math.max(0, st.size - +m[2]), end = m[1] && m[2] ? Math.min(+m[2], st.size - 1) : st.size - 1;
+      if (!m || (!m[1] && !m[2])) { res.writeHead(200, { ...base, 'Content-Length': st.size }); return fs.createReadStream(file).pipe(res); }
+      const start = m[1] ? +m[1] : Math.max(0, st.size - +m[2]), end = m[1] && m[2] ? Math.min(+m[2], st.size - 1) : st.size - 1;
       if (start > end || start >= st.size) return res.writeHead(416, { 'Content-Range': `bytes */${st.size}` }).end();
       res.writeHead(206, { ...base, 'Content-Range': `bytes ${start}-${end}/${st.size}`, 'Content-Length': end - start + 1 });
-      fs.createReadStream(full, { start, end }).pipe(res);
-    });
-  }
-  const gz = /gzip/.test(req.headers['accept-encoding'] || '') && /javascript|html|css|json|octet-stream|gltf-binary|plain/.test(hit[1]);
-  if (gz && GZ.has(full)) return res.writeHead(200, { ...headers, 'Content-Encoding': 'gzip', Vary: 'Accept-Encoding' }).end(GZ.get(full));
-  fs.readFile(full, (err, buf) => {
-    if (err) return res.writeHead(err.code === 'ENOENT' ? 404 : 500).end('error');
-    if (!gz) return res.writeHead(200, headers).end(buf);
-    zlib.gzip(buf, (e, out) => {
-      if (e) return res.writeHead(200, headers).end(buf);
-      if (file) GZ.set(full, out);
-      res.writeHead(200, { ...headers, 'Content-Encoding': 'gzip', Vary: 'Accept-Encoding' }).end(out);
+      return fs.createReadStream(file, { start, end }).pipe(res);
+    }
+    const gz = wantGz && /javascript|html|css|json|octet-stream|gltf-binary|plain/.test(type);
+    if (gz) headers.Vary = 'Accept-Encoding';
+    if (req.headers['if-none-match'] === etag) return res.writeHead(304, headers).end();
+    const hit = gz && GZ.get(file);
+    if (hit && hit.etag === etag) return res.writeHead(200, { ...headers, 'Content-Encoding': 'gzip' }).end(hit.out);
+    fs.readFile(file, (e1, buf) => {
+      if (e1) return res.writeHead(500).end('error');
+      if (!gz) return res.writeHead(200, headers).end(buf);
+      zlib.gzip(buf, (e2, out) => {
+        if (e2) return res.writeHead(200, headers).end(buf);
+        GZ.set(file, { etag, out });
+        res.writeHead(200, { ...headers, 'Content-Encoding': 'gzip' }).end(out);
+      });
     });
   });
 });
-const GZ = new Map(); // 壓縮結果快取(只快取不會變動的 vendor / assets 檔案)
 
 const wss = new WebSocketServer({ server, maxPayload: 65536 }); // 還原備份時一次會送整份存檔
 wss.on('connection', (ws) => {
